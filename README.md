@@ -20,9 +20,14 @@ The architecture is defined with synthesis and analysis blocks inspired by the 3
 To install using pip do this in your python environment:
 
 ```  
-git clone git+https://github.com/aniketkt/TomoEncoders.git
+git clone https://github.com/aniketkt/TomoEncoders.git
 cd TomoEncoders
 pip install .
 ```  
+
+## Train Encoders for Porosity  
+```
+python bin/train_porosity_encoders.py
+```
 
 <p align="center">atekawade [at] anl [dot] gov</p>  
