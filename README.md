@@ -1,5 +1,3 @@
-[![DOCS](https://readthedocs.org/projects/docs/badge/?version=latest)](https://tomotwin.readthedocs.io/en/latest/?badge=latest)
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/aniketkt/TomoTwin/master?filepath=notebooks%2Fsynthesize_voids_and_inclusions.ipynb)
 
 # TomoEncoders
 
@@ -11,7 +9,7 @@ The architecture is defined with synthesis and analysis blocks inspired by the 3
   <img width="800" src="imgs/autoencoder_architecture.png">
 </p>  
 
-The encoder-decoder (segmenter or denoiser) is trained by sampling patches of data from the 3D image pairs (grayscale and binarized image) around random coordinates to generate training data. Then, the encoder part is separated, and latent vectors are projected to 2D by PCA. Once trained, patches can be sampled from a given list of coordinates in the grayscale volume to identify morphological similarities.  
+<p align = "justify">The encoder-decoder (segmenter or denoiser) is trained by sampling patches of data from the 3D image pairs (grayscale and binarized image) around random coordinates to generate training data. Then, the encoder part is separated, and latent vectors are projected to 2D by PCA. Once trained, patches can be sampled from a given list of coordinates in the grayscale volume to identify morphological similarities.  </p>
 
 <p align="center">
   <img width="800" src="imgs/representation_learning.png">
