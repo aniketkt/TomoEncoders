@@ -17,7 +17,7 @@ setup(
     # Needed for dependencies
     install_requires=['numpy==1.20.2', 'pandas', 'scipy', 'h5py', 'matplotlib', \
                       'opencv-python', 'porespy', \
-                      'ConfigArgParse', 'tqdm', 'ipython', 'seaborn', 'tensorflow==2.2'],
+                      'ConfigArgParse', 'tqdm', 'ipython', 'seaborn', 'tensorflow==2.4'],
     version=open('VERSION').read().strip(),
     license='BSD',
     description='Representation learning for latent encoding of morphology in 3D tomographic images',
