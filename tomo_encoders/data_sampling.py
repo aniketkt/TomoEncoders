@@ -376,11 +376,6 @@ def data_generator(X, Y, patch_size, batch_size):
 
 
         
-        
-        
-        
-
-        
 def data_generator_porespy(patch_size, batch_size, porosity_range = (0.1,0.9), blob_range = (0.1,3)):
 
     while True:
@@ -392,6 +387,67 @@ def data_generator_porespy(patch_size, batch_size, porosity_range = (0.1,0.9), b
         
         x = y + np.random.normal(0, 0.1, y.shape)
         yield x[...,np.newaxis], y[...,np.newaxis]
+        
+        
+        
+def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rotate = False):
+    
+    """
+    Generator that yields randomly sampled data pairs of number = batch_size.
+    
+    Parameters:
+    ----------
+    Xs: np.array
+        Input volumes, list of 3D or 4D array
+
+    patch_size: tuple
+        size of the 3D patch as input volume
+
+    batch_size: int
+        size of the batch (number of patches to be extracted per batch)
+
+    add_noise: float
+        Stdev of added noise
+
+    Returns:
+    ----------
+    tuple
+        x, y numpy arrays each of shape (batch_size, ny, ny, 1)
+    """
+    
+    while True:
+
+        np.random.RandomState(seed = 12345)
+        idx_tsteps = np.random.randint(0, Xs.shape[0], size = batch_size)
+        vol_shape = Xs.shape[1:]
+        idxs = np.asarray([np.random.randint(0, vol_shape[ii] - patch_size[ii], batch_size) \
+                           for ii in range(3)])
+
+        y = []
+
+        for ib in range(batch_size):
+
+            sz = slice(idxs[0, ib], idxs[0, ib] + patch_size[0])
+            sy = slice(idxs[1, ib], idxs[1, ib] + patch_size[1])
+            sx = slice(idxs[2, ib], idxs[2, ib] + patch_size[2])
+
+            y.append(Xs[idx_tsteps[ib], sz, sy, sx].copy())
+
+        y = np.asarray(y)
+        y = y[..., np.newaxis]
+
+        x = y.copy()
+        x = x + np.random.normal(0, add_noise, x.shape)
+
+        if random_rotate:
+
+            nrots = np.random.randint(0, 4, batch_size)
+            for ii in range(batch_size):
+                axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
+                x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
+                y[ii, ..., 0] = np.rot90(y[ii, ..., 0], k=nrots[ii], axes=axes)
+
+        yield (x, y)
     
     
     
