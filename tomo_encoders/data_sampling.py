@@ -389,8 +389,7 @@ def data_generator_porespy(patch_size, batch_size, porosity_range = (0.1,0.9), b
         yield x[...,np.newaxis], y[...,np.newaxis]
         
         
-        
-def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rotate = False):
+def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, scan_idx = False, random_rotate = False, time = None):
     
     """
     Generator that yields randomly sampled data pairs of number = batch_size.
@@ -408,6 +407,10 @@ def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rot
 
     add_noise: float
         Stdev of added noise
+        
+    time: np.array
+        timestep for Xs data
+        either scan_idx is Flase or time is None or neither
 
     Returns:
     ----------
@@ -424,6 +427,8 @@ def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rot
                            for ii in range(3)])
 
         y = []
+        
+        t = []
 
         for ib in range(batch_size):
 
@@ -432,6 +437,9 @@ def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rot
             sx = slice(idxs[2, ib], idxs[2, ib] + patch_size[2])
 
             y.append(Xs[idx_tsteps[ib], sz, sy, sx].copy())
+            
+            if type(time) != type(None):
+                t.append(time[idx_tsteps[ib]]) #?
 
         y = np.asarray(y)
         y = y[..., np.newaxis]
@@ -446,8 +454,14 @@ def data_generator_4D_denoiser(Xs, patch_size, batch_size, add_noise, random_rot
                 axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
                 x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
                 y[ii, ..., 0] = np.rot90(y[ii, ..., 0], k=nrots[ii], axes=axes)
-
-        yield (x, y)
+                
+                
+        if scan_idx: #added for sample labels
+            yield (x, y, idx_tsteps)
+        if type(time) != type(None):
+            yield (x, y, t)
+        else:
+            yield (x, y)
     
     
     
