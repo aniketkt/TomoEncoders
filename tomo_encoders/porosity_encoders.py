@@ -365,13 +365,13 @@ def build_CAE_3D(vol_shape, n_filters = [16,32,64], \
     # upsampling path. e.g. n_blocks = 3
     for ii in range(n_blocks-1, -1, -1):
         # ii iterates as 2, 1, 0
-#         print("############# ii = %i"%ii)
+    #         print("############# ii = %i"%ii)
 
-# this piece of code was accidentally left in from a previous version of the function and led to unknowingly removing the first skip connection.    
-#         if ii == 0:
-#             concat_flag = False
-#         else:
-#             concat_flag = isconcat[ii]
+    # this piece of code was accidentally left in from a previous version of the function and led to unknowingly removing the first skip connection.    
+    #         if ii == 0:
+    #             concat_flag = False
+    #         else:
+    #             concat_flag = isconcat[ii]
         
         decoded = synthesis_block(decoded, \
                                   n_filters[ii], \
@@ -388,6 +388,165 @@ def build_CAE_3D(vol_shape, n_filters = [16,32,64], \
     segmenter = keras.models.Model(inp, decoded, name = "segmenter")
     
     return encoder, segmenter
+
+def build_CAE_3D_2(vol_shape, n_filters = [32, 64], \
+                 n_blocks = 2, activation = 'lrelu',\
+                 batch_norm = True, kern_size = 3, kern_size_upconv = 2,\
+                 stdinput = False, hidden_units = [128,32,2],\
+                 isconcat = None, pool_size = 2):
+    
+    
+    """
+    Two layers with two max pool steps.
+    
+    Define a 3D convolutional autoencoder, based on the arguments provided. Output image size is the same as input image size. 
+   
+    
+    Returns
+    -------
+    tf.Keras.model
+        keras model(s) for a 3D autoencoder-decoder architecture.  
+        
+    Parameters
+    ----------
+    vol_shape  : tuple
+            input volume shape (nz,ny,nx,1)  
+            
+    n_filters : list
+            a list of the number of filters in the convolutional layers for each block. Length must equal number of number of blocks.  
+            
+    n_blocks  : int
+            Number of repeating blocks in the convolutional part  
+            
+    activation : str or tf.Keras.layers.Activation
+            name of custom activation or Keras activation layer  
+            
+    batch_norm : bool
+            True to insert BN layer after the convolutional layers  
+            
+    kern_size  : tuple
+            kernel size for conv. layers in downsampling block, e.g. (3,3,3).  
+            
+    kern_size_upconv  : tuple
+            kernel size for conv. layers in upsampling block, e.g. (2,2,2).  
+            
+    stdinput     : bool
+            If True, the input image will be normalized into [0,1]  
+            
+    isconcat : bool or list
+            Selectively concatenate layers (skip connections)  
+    
+    hidden_units: list
+            list of number of hidden layer units. last value is the code.  
+            
+    pool_size : int or list
+            if list, list length must be equal to number of blocks.  
+            
+    """
+      
+    
+    inp = L.Input(vol_shape)
+    
+    if stdinput:
+        standardizer = L.Lambda(standardize)
+        stdinp = standardizer(inp)
+    else:
+        stdinp = inp
+    
+    if isconcat is None:
+        isconcat = [False]*n_blocks
+    
+    if type(pool_size) is int:
+        pool_size = [pool_size]*n_blocks
+    elif len(pool_size) != n_blocks:
+        raise ValueError("list length must be equal to number of blocks")
+        
+    concats = []
+    # downsampling path. e.g. n_blocks = 3, n_filters = [16,32,64], input volume is 64^3
+    for ii in range(n_blocks): #iterations
+        
+        if ii == 0:
+            code = stdinp
+            
+        code, concat_tensor = analysis_block(code, \
+                                             n_filters[ii], \
+                                             pool_size[ii], \
+                                             kern_size = kern_size, \
+                                             activation = activation, \
+                                             batch_norm = batch_norm)
+        
+        concats.append(concat_tensor)
+        
+    # pool a second time before flattening
+    code = L.MaxPool3D(pool_size = 2, padding = "same")(code)
+
+    for ic, n_hidden in enumerate(hidden_units):
+        if ic == len(hidden_units) - 1:  # ic = 2 (last unit is the code)
+            break
+        elif ic == 0:
+            # ic = 0 --> n_hidden = 128;
+            # first hidden layer takes flattened vector as input
+            preflatten_shape = tuple(code.shape[1:])
+            code = L.Flatten()(code)
+            flatten_shape = code.shape[-1]
+            code = hidden_layer(code, n_hidden, \
+                                activation = activation, \
+                                batch_norm = batch_norm)
+        else:
+            # ic = 1 --> n_hidden = 32;
+            code = hidden_layer(code, n_hidden, \
+                                activation = activation, \
+                                batch_norm = batch_norm)
+        
+    z = hidden_layer(code, hidden_units[-1], \
+                     activation = activation, \
+                     batch_norm = True)
+    
+    encoder = keras.models.Model(inp, z, name = "encoder")
+    
+    for ic, n_hidden in enumerate(hidden_units[::-1]): # iterate as e.g. [16,32,128]
+        if ic == 0:
+            # skip n_hidden = 16 as we already implemented that in the previous loop
+            decoded = z
+        else:
+            # ic = 1 --> n_hidden = 32
+            # ic = 2 --> n_hidden = 128
+            decoded = hidden_layer(decoded, n_hidden, activation = activation, batch_norm = batch_norm)
+
+    # n_hidden = flattened shape
+    decoded = hidden_layer(decoded, flatten_shape, activation = activation, batch_norm = batch_norm)
+
+    # reshape to convolutional feature maps
+    decoded = L.Reshape(preflatten_shape)(decoded)
+
+    # upsample once before synthesis block
+    n_filters_upconv = decoded.shape[-1]
+    decoded = L.Conv3DTranspose(n_filters_upconv, \
+                                kern_size_upconv, \
+                                padding = "same", \
+                                activation = None, \
+                                strides = 2) (decoded)
+    decoded = insert_activation(decoded, activation)
+    
+    # upsampling path. e.g. n_blocks = 3
+    for ii in range(n_blocks-1, -1, -1):
+        
+        decoded = synthesis_block(decoded, \
+                                  n_filters[ii], \
+                                  pool_size[ii], \
+                                  concat_tensor = concats[ii], \
+                                  activation = activation, \
+                                  kern_size = kern_size, \
+                                  kern_size_upconv = kern_size_upconv, \
+                                  batch_norm = batch_norm, \
+                                  concat_flag = isconcat[ii])
+        
+    decoded = L.Conv3D(1, (1,1,1), activation = 'sigmoid', padding = "same")(decoded)
+    
+    segmenter = keras.models.Model(inp, decoded, name = "segmenter")
+    
+    return encoder, segmenter
+    
 
 
 def build_Unet_3D(vol_shape, n_filters = [16,32,64], \
