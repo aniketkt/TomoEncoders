@@ -31,7 +31,7 @@ import abc
 class Patches():
     
     def __init__(self, vol_shape, initialize_by = "data", \
-                 features = None, feature_names = None, **kwargs):
+                 features = None, names = [], **kwargs):
         '''
         
         '''
@@ -42,16 +42,53 @@ class Patches():
                         "grid" : self._set_grid}
 
         self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
-        
         self._check_valid_points()
 
-        
-        self.features = None
         # append features if passed
-        if features is not None:
-            self.append_features(features)
+        self.features = None
+        self.feature_names = []
+        self.append_features(features, names)
+        return
+    
+    
+    def append_features(self, features, names = []):
+        '''
+        Store features corresponding to patch coordinates.
+        
+        Parameters
+        ----------
+        features : np.array  
+            array of features, must be same length and as corresponding patch coordinates.  
+        '''
+
+        if features is None:
+            return
+        
+        # handle feature array here
+        if len(self.points) != len(features): # check length
+            raise ValueError("numbers of anchor points and corresponding features must match")
+        if features.ndim != 2: # check shape
+            raise ValueError("shape of features array not valid")
+        else:
+            npts, nfe = features.shape
+
+        if self.features is not None:
+            self.features = np.concatenate([self.features, features], axis = 1)
+        else:
+            self.features = features
+            
+        # handle feature names here
+        cond1 = len(self.feature_names) != 0
+        cond2 = len(names) != features.shape[-1]
+        if cond1 and cond2:
+            raise ValueError("feature array and corresponding names input are not compatible")
+        else:
+            self.feature_names += names
         
         return
+    
+    
+    
     
     def _check_data(self, points = None, widths = None, check_valid = None):
         
@@ -65,6 +102,19 @@ class Patches():
             
         return points, widths, check_valid
     
+    def features_to_numpy(self, names):
+        '''
+        Parameters
+        ----------
+        names : list of strings with names of features  
+        
+        '''
+        
+        if self.feature_names is None: raise ValueError("feature names must be defined first.")
+        out_list = []
+        for name in names:
+            out_list.append(self.features[:,self.feature_names.index(name)])
+        return np.asarray(out_list).T
     
     def _check_stride(self, patch_size, stride):
         
@@ -164,29 +214,6 @@ class Patches():
         return np.asarray(s)
     
         
-    def append_features(self, features):
-        '''
-        Store features corresponding to patch coordinates.
-        
-        Parameters
-        ----------
-        features : np.array  
-            array of features, must be same length and as corresponding patch coordinates.  
-        '''
-        # check length
-        if len(self.points) != len(features):
-            raise ValueError("numbers of anchor points and corresponding features must match")
-        if features.ndim != 2:
-            raise ValueError("dimensionality of features array not valid")
-        else:
-            npts, nfe = features.shape
-        
-        if self.features is not None:
-            self.features = np.concatenate([self.features, features], axis = 1)
-        else:
-            self.features = features
-        
-        return
             
     def filter_by_condition(self, cond_list):
         '''  
