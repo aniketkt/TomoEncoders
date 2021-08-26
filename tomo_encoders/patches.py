@@ -41,7 +41,9 @@ class Patches():
         
         initializers = {"data" : self._check_data, \
                         "grid" : self._set_grid, \
-                        "random-grids" : self._set_random_grids}
+                        "multiple-grids" : self._set_multiple_grids, \
+                        "random-fixed-width" : self._get_random_fixed_width, \
+                        "random" : self._get_random}
 
         self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
         self._check_valid_points()
@@ -147,17 +149,17 @@ class Patches():
         
         if stride is None: return patch_size
         
-        max_stride = min([self.vol_shape[ii]//patch_size[ii] for ii in range(len(self.vol_shape))])
-        if stride > max_stride:
+        max_possible_stride = min([self.vol_shape[ii]//patch_size[ii] for ii in range(len(self.vol_shape))])
+        if stride > max_possible_stride:
             raise ValueError("Cannot preserve aspect ratio with given value of zoom_out. Pick lower value.")
 
         return tuple([patch_size[ii]*stride for ii in range(3)])
         
 
-    def _set_random_grids(self, min_patch_size = None, \
-                          max_stride = None, max_points = None):
+    def _set_multiple_grids(self, min_patch_size = None, \
+                          max_stride = None, n_points = None):
         '''
-        Sets multiple random grids starting from the minimum patch_size up to the maximum using stride as a multiplier.  
+        Sets multiple grids starting from the minimum patch_size up to the maximum using stride as a multiplier. if n_points is passed, returns only that many randomly sampled patches.    
         
         '''
         all_strides = [i+1 for i in range(max_stride)]
@@ -171,10 +173,10 @@ class Patches():
         points = np.concatenate(points, axis = 0)
         widths = np.concatenate(widths, axis = 0)
             
-        if max_points is not None:
+        if n_points is not None:
             # sample randomly
             rng = default_rng()
-            idxs = rng.choice(points.shape[0], max_points, replace = False)
+            idxs = rng.choice(points.shape[0], n_points, replace = False)
             points = points[idxs,...].copy()
             widths = widths[idxs,...].copy()
         
@@ -218,6 +220,61 @@ class Patches():
         
         return np.asarray(points), np.asarray(widths), False
 
+    def _get_random_fixed_width(self, patch_size = None, n_points = None, stride = None):
+        """
+        Generator that yields randomly sampled data pairs of number = batch_size.
+
+        Parameters:
+        ----------
+        patch_size: tuple  
+            size of the 3D patch as input volume  
+            
+        stride : int  
+            (optional) width is defined as stride value multiplied by min_patch_size. Default is None (or = 1)    
+
+        n_points: int
+            size of the batch (number of patches to be extracted per batch)
+
+        """
+        patch_size = self._check_stride(patch_size, stride)
+        
+        points = np.asarray([np.random.randint(0, self.vol_shape[ii] - patch_size[ii], n_points) \
+                           for ii in range(3)]).T
+        widths = np.asarray([list(patch_size)]*n_points)
+        return np.asarray(points), np.asarray(widths), False
+    
+    
+    def _get_random(self, min_patch_size = None, max_stride = None, n_points = None):
+        """
+        Generator that yields randomly sampled data pairs of number = batch_size.
+
+        Parameters:
+        ----------
+        min_patch_size: tuple
+            size of the 3D patch as input volume
+
+        max_stride : int  
+            width is defined as stride value multiplied by min_patch_size.    
+            
+        n_points: int
+            size of the batch (number of patches to be extracted per batch)  
+
+        """
+        _ = self._check_stride(min_patch_size, max_stride) # check max stride before going into the loop
+        random_strides = np.random.randint(1, max_stride+1, n_points)
+        points = []
+        widths = []
+        for stride in random_strides:
+            curr_patch_size = self._check_stride(min_patch_size, stride)
+            points.append([np.random.randint(0, self.vol_shape[ii] - curr_patch_size[ii]) for ii in range(3)])    
+            widths.append(list(curr_patch_size))
+
+        points = np.asarray(points)
+        widths = np.asarray(widths)        
+        
+        return np.asarray(points), np.asarray(widths), False
+    
+    
     def _check_valid_points(self):
         is_valid = True
         for ii in range(len(self.points)):

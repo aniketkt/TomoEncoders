@@ -191,12 +191,6 @@ def ellipse_or_sphere_generator(patch_size, batch_size, \
         else:
             yield (x, y)
     
-    
-    
-    
-    
-    
-
 def ellipse_generator(patch_size, batch_size, \
                       ellipse_range = (0.3, 1.8), \
                       rad_range = (10,16), add_noise = 0.1, \
