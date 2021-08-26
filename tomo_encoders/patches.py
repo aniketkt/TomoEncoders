@@ -24,6 +24,7 @@ from multiprocessing import Pool, cpu_count
 import functools
 
 import numpy as np
+from numpy.random import default_rng
 import h5py
 import abc
 
@@ -39,7 +40,8 @@ class Patches():
         self.vol_shape = vol_shape
         
         initializers = {"data" : self._check_data, \
-                        "grid" : self._set_grid}
+                        "grid" : self._set_grid, \
+                        "random-grids" : self._set_random_grids}
 
         self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
         self._check_valid_points()
@@ -47,11 +49,10 @@ class Patches():
         # append features if passed
         self.features = None
         self.feature_names = []
-        self.append_features(features, names)
+        self.add_features(features, names)
         return
     
-    
-    def append_features(self, features, names = []):
+    def add_features(self, features, names = []):
         '''
         Store features corresponding to patch coordinates.
         
@@ -88,6 +89,39 @@ class Patches():
         return
     
     
+    def append(self, more_patches):
+        
+        '''
+        Append the input patches to self in place.  
+        
+        Parameters  
+        ----------  
+        more_patches : Patches
+            additional rows of patches to be appended.  
+            
+        Returns
+        -------
+        None
+            Append in place so nothing is returned.  
+        '''
+        
+        if self.vol_shape != more_patches.vol_shape:
+            raise ValueError("patches data is not compatible. Ensure that big volume shapes match")
+            
+        self.points = np.concatenate([self.points, more_patches.points], axis = 0)
+        self.widths = np.concatenate([self.widths, more_patches.widths], axis = 0)
+        
+        # if features are not stored already, do nothing more
+        if self.features is None:
+            return
+        
+        # if feature vector shapes mismatch, numpy will throw an error for concatenate  
+        self.features = np.concatenate([self.features, more_patches.features], axis = 0)
+        
+        # if feature name vectors don't match, raise an error
+        if self.feature_names != more_patches.feature_names:
+            raise ValueError("feature names in self do not match input")
+        return
     
     
     def _check_data(self, points = None, widths = None, check_valid = None):
@@ -101,20 +135,6 @@ class Patches():
         widths = np.asarray(widths)
             
         return points, widths, check_valid
-    
-    def features_to_numpy(self, names):
-        '''
-        Parameters
-        ----------
-        names : list of strings with names of features  
-        
-        '''
-        
-        if self.feature_names is None: raise ValueError("feature names must be defined first.")
-        out_list = []
-        for name in names:
-            out_list.append(self.features[:,self.feature_names.index(name)])
-        return np.asarray(out_list).T
     
     def _check_stride(self, patch_size, stride):
         
@@ -133,6 +153,33 @@ class Patches():
 
         return tuple([patch_size[ii]*stride for ii in range(3)])
         
+
+    def _set_random_grids(self, min_patch_size = None, \
+                          max_stride = None, max_points = None):
+        '''
+        Sets multiple random grids starting from the minimum patch_size up to the maximum using stride as a multiplier.  
+        
+        '''
+        all_strides = [i+1 for i in range(max_stride)]
+        
+        points = []
+        widths = []
+        for stride in all_strides:
+            p, w, _ = self._set_grid(patch_size = min_patch_size, stride = stride)
+            points.append(p)
+            widths.append(w)
+        points = np.concatenate(points, axis = 0)
+        widths = np.concatenate(widths, axis = 0)
+            
+        if max_points is not None:
+            # sample randomly
+            rng = default_rng()
+            idxs = rng.choice(points.shape[0], max_points, replace = False)
+            points = points[idxs,...].copy()
+            widths = widths[idxs,...].copy()
+        
+        return np.asarray(points), np.asarray(widths), False
+                          
     def _set_grid(self, patch_size = None, stride = None):
 
         '''
@@ -213,8 +260,20 @@ class Patches():
         s = [[int(self.points[ii,jj] + self.widths[ii,jj]//2) for jj in range(3)] for ii in range(len(self.points))]
         return np.asarray(s)
     
+    def features_to_numpy(self, names):
+        '''
+        Parameters
+        ----------
+        names : list of strings with names of features  
         
-            
+        '''
+        
+        if self.feature_names is None: raise ValueError("feature names must be defined first.")
+        out_list = []
+        for name in names:
+            out_list.append(self.features[:,self.feature_names.index(name)])
+        return np.asarray(out_list).T
+    
     def filter_by_condition(self, cond_list):
         '''  
         Select coordinates based on condition list. Here we use numpy.compress. The input cond_list can be from a number of classifiers.  
@@ -236,9 +295,39 @@ class Patches():
         return Patches(self.vol_shape, initialize_by = "data", \
                        points = np.compress(cond_list, self.points, axis = 0),\
                        widths = np.compress(cond_list, self.widths, axis = 0),\
-                       features = np.compress(cond_list, self.features, axis = 0))
+                       features = np.compress(cond_list, self.features, axis = 0), \
+                       names = self.feature_names)
     
+    def select_by_indices(self, idxs):
+
+        '''
+        Select patches corresponding to the input list of indices.  
+        Parameters
+        ----------
+        idxs : list  
+            list of integers as indices.  
+        '''
         
+        return Patches(self.vol_shape, initialize_by = "data", \
+                       points = self.points[idxs],\
+                       widths = self.widths[idxs],\
+                       features = self.features[idxs], \
+                       names = self.feature_names)
+        
+    def select_random_sample(self, n_points):
+        
+        '''
+        Select a given number of patches randomly without replacement.  
+        
+        Parameters
+        ----------
+        n_points : list  
+            list of integers as indices.  
+        '''
+        rng = default_rng()
+        idxs = rng.choice(self.points.shape[0], n_points, replace = False)
+        return self.select_by_indices(idxs)
+    
     def sort_by_feature(self, feature = None, ife = None):
         '''  
         Sort patches list in ascending order of the value of a feature.    
@@ -259,16 +348,14 @@ class Patches():
             if len(feature) != len(self.points): raise ValueError("length of feature array must match number of patch points")
         
         idxs = np.argsort(feature)
-        return Patches(self.vol_shape, initialize_by = "data", \
-                       points = self.points[idxs],\
-                       widths = self.widths[idxs],\
-                       features = self.features[idxs])
+        
+        return self.select_by_indices(idxs)
     
-    def select_patches(self, n_selections,\
+    def select_by_feature(self, n_selections,\
                        feature = None, ife = None,\
                        selection_by = "highest"):
         '''  
-        Select "n_selections" patches having the "highest" or "lowest" feature value. The values are sorted (starting with highest or lowest), then the first n_selections values are chosen. For e.g., if feature contains values 0.1, 0.9, 1.5, 2.0, n_selections = 2 and selection_by = highest, then the patches having feature value 2.0 and 1.5 will be selected.  
+        Select highest (or lowest) n_selections patches based on a feature value. The values are sorted (starting with highest or lowest), then the first n_selections values are chosen. For e.g., if feature contains values 0.1, 0.9, 1.5, 2.0, n_selections = 2 and selection_by = highest, then the patches having feature value 2.0 and 1.5 will be selected.  
         
         Parameters  
         ----------  
@@ -295,11 +382,8 @@ class Patches():
             idxs = idxs[::-1]
         idxs = idxs[:n_selections]
 
-        return Patches(self.vol_shape, initialize_by = "data", \
-                       points = self.points[idxs],\
-                       widths = self.widths[idxs],\
-                       features = self.features[idxs])
-
+        return self.select_by_indices(idxs)
+        
     def extract(self, vol):
 
         '''  
