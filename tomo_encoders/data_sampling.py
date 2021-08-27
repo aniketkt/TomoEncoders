@@ -236,8 +236,6 @@ def ellipse_generator(patch_size, batch_size, \
         else:
             yield (x, y)
         
-
-
 def data_generator_4D(Xs, Ys, patch_size, batch_size, scan_idx = False, add_noise = None, random_rotate = False):
     """
     Generator that yields randomly sampled data pairs of number = batch_size. Xs, Ys is a list of arbitrarily sized volume pairs of train / test / validation data.

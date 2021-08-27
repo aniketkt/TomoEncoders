@@ -34,7 +34,12 @@ class Patches():
     def __init__(self, vol_shape, initialize_by = "data", \
                  features = None, names = [], **kwargs):
         '''
+        A patch is the set of all pixels in a rectangle / cuboid sampled from a (big) image / volume. The Patches data structure allows the following. Think of this as a pandas DataFrame. Each row stores coordinates and features corresponding to a new patch constrained within a big volume of shape vol_shape.  
         
+        1. stores coordinates and widths of the patches as arrays of shape (n_pts, z, y, x,) and (n_pts, pz, py, px) respectively.
+        2. extracts patches from a big volume and reconstructs a big volume from patches
+        3. stores feature vectors evaluated on the patches as an array of shape (n_pts, n_features)
+        4. filters, sorts and selects patches based on a feature or features        
         '''
         
         self.vol_shape = vol_shape
@@ -56,7 +61,6 @@ class Patches():
             self.feature_names = []
             self.add_features(features, names)
             return
-    
 
     def dump(self, fpath):
         # create df from points, widths, features
