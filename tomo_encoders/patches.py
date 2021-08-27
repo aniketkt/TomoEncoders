@@ -45,14 +45,53 @@ class Patches():
                         "random-fixed-width" : self._get_random_fixed_width, \
                         "random" : self._get_random}
 
-        self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
-        self._check_valid_points()
+        if initialize_by == "file":
+            self._load_from_disk(**kwargs)
+            return
+        else:
+            self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
+            self._check_valid_points()
+            # append features if passed
+            self.features = None
+            self.feature_names = []
+            self.add_features(features, names)
+            return
+    
 
-        # append features if passed
-        self.features = None
-        self.feature_names = []
-        self.add_features(features, names)
+    def dump(self, fpath):
+        # create df from points, widths, features
+        
+        with h5py.File(fpath, 'w') as hf:
+            hf.create_dataset("vol_shape", data = self.vol_shape)
+            hf.create_dataset("points", data = self.points)
+            hf.create_dataset("widths", data = self.widths)
+            if self.features is not None:
+                hf.create_dataset("features", data = self.features)
+            if len(self.feature_names) > 0:
+                hf.create_dataset("feature_names", data = np.asarray(self.feature_names, dtype = 'S'))
         return
+    
+    # use this when initialize_by = "file"
+    def _load_from_disk(self, fpath = None):
+        
+        with h5py.File(fpath, 'r') as hf:
+            vol_shape = tuple(np.asarray(hf["vol_shape"]))
+            if np.any(vol_shape != self.vol_shape):
+                raise ValueError("Volume shape of patches requested does not match the attribute read from the file")
+                
+            self.points = np.asarray(hf["points"])
+            self.widths = np.asarray(hf["widths"])
+            if "features" in hf:
+                self.features = np.asarray(hf["features"])
+            else:
+                self.features = None
+                
+            if "feature_names" in hf:
+                out_list = list(hf["feature_names"])
+                self.feature_names = [name.decode('UTF-8') for name in out_list]
+            else:
+                self.feature_names = []
+
     
     def add_features(self, features, names = []):
         '''
@@ -89,7 +128,6 @@ class Patches():
             self.feature_names += names
         
         return
-    
     
     def append(self, more_patches):
         
