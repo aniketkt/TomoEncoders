@@ -243,7 +243,6 @@ class Patches():
         widths = np.asarray([list(patch_size)]*n_points)
         return np.asarray(points), np.asarray(widths), False
     
-    
     def _get_random(self, min_patch_size = None, max_stride = None, n_points = None):
         """
         Generator that yields randomly sampled data pairs of number = batch_size.
@@ -261,7 +260,7 @@ class Patches():
 
         """
         _ = self._check_stride(min_patch_size, max_stride) # check max stride before going into the loop
-        random_strides = np.random.randint(1, max_stride+1, n_points)
+        random_strides = np.random.randint(1, max_stride, n_points)
         points = []
         widths = []
         for stride in random_strides:
@@ -289,7 +288,12 @@ class Patches():
             raise ValueError("Some points are invalid")
         return
     
-    def slices(self):
+    def _points_to_slices(self, a, w, b):
+        
+        # b is binning, a is the array of start values and w = stop - start (width)
+        return [[slice(a[ii,jj], a[ii,jj] + w[ii,jj], b[ii]) for jj in range(3)] for ii in range(len(a))]
+    
+    def slices(self, binning = None):
         '''  
         Get python slice objects from the list of coordinates  
         
@@ -300,7 +304,12 @@ class Patches():
         
         '''  
         
-        s = [[slice(self.points[ii,jj], self.points[ii,jj] + self.widths[ii,jj]) for jj in range(3)] for ii in range(len(self.points))]
+        if binning is None:
+            binning = [1]*len(self.points)
+        elif isinstance(binning, int):
+            binning = [binning]*len(self.points)
+            
+        s = self._points_to_slices(self.points, self.widths, binning)
         return np.asarray(s)
     
     def centers(self):
@@ -441,7 +450,22 @@ class Patches():
 
         return self.select_by_indices(idxs)
         
-    def extract(self, vol):
+    def _calc_binning(self, patch_size):        
+        bin_vals = self.widths//np.asarray(patch_size)
+        cond1 = np.sum(np.max(bin_vals, axis = 1) != np.min(bin_vals, axis = 1)) > 0
+        cond2 = np.any(bin_vals == 0)
+        cond3 = np.any(self.widths%np.asarray(patch_size))
+        
+        if cond1: # binning is assumed to be isotropic so aspect ratio must be preserved
+            raise ValueError("aspect ratios of some patches don't match!! Cannot bin to patch_size")
+        if cond2: # avoid the need to upsample patches, can use a smaller model instead
+            raise ValueError("patch_size cannot be larger than any given patch in the list")
+        if cond3: # constraint for ensuring stitch() works
+            raise ValueError("stitch only works when binning values are even numbers")
+
+        return bin_vals[:,0]
+    
+    def extract(self, vol, patch_size):
 
         '''  
         Returns a list of volume patches at the active list of coordinates by drawing from the given big volume 'vol'  
@@ -452,20 +476,21 @@ class Patches():
             shape is (n_pts, patch_z, patch_y, patch_x)  
         
         '''  
-        
         if vol.shape != self.vol_shape:
             raise ValueError("Shape of big volume does not match vol_shape attribute of patches data")
-        
+
+        # calculate binning
+        bin_vals = self._calc_binning(patch_size)
         # make a list of slices
-        s = self.slices()
+        s = self.slices(binning = bin_vals)
         # make a list of patches
-        p = [np.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
+        sub_vols = [np.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
         
-        return p
+        return np.asarray(sub_vols, dtype = vol.dtype)
     
-    def reconstruct(self, p):
+    def stitch(self, sub_vols, patch_size, upsample = False):
         '''  
-        Reconstructs the big volume from a list of volume patches provided.  
+        Stitches the big volume from a list of volume patches (with upsampling).    
         
         Returns
         -------
@@ -474,16 +499,29 @@ class Patches():
         
         '''  
         
-        if p.shape[0] != len(self.points):
+        if sub_vols.shape[0] != len(self.points):
             raise ValueError("number of patch points and length of input list of patches must match")
-            
-        vol = np.zeros(self.vol_shape, dtype = p.dtype)
+        vol = np.zeros(self.vol_shape, dtype = sub_vols.dtype)
         
-        s = self.slices()
+        # calculate binning
+        bin_vals = self._calc_binning(patch_size)
+        # make a list of slices
+        s = self.slices(binning = bin_vals)
         for ii in range(len(self.points)):
-            vol[s[ii,0],s[ii,1],s[ii,2]] = p[ii]
+            if upsample:
+                for ibin in range(bin_vals[ii]):
+                    vol[self._slice_shift(s[ii,0], ibin),\
+                        self._slice_shift(s[ii,1], ibin),\
+                        self._slice_shift(s[ii,2], ibin)] = sub_vols[ii]
+            else:
+                vol[s[ii,0],s[ii,1],s[ii,2]] = sub_vols[ii]
         return vol
-        
+
+    def _slice_shift(self, s, shift):
+        return slice(s.start + shift, s.stop + shift, s.step)
+    
+    
+    
 if __name__ == "__main__":
     
     print('just a bunch of functions')
