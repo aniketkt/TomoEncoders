@@ -563,6 +563,20 @@ class Patches():
         return slice(s.start + shift, s.stop + shift, s.step)
     
     
+    def plot_3D_feature(self, ife, fig, plot_type = 'centers'):
+
+        ax = fig.add_subplot(projection='3d')
+
+        if plot_type == 'centers':
+            ax.scatter(self.centers()[:,0], self.centers()[:,1], self.centers()[:,2], c = self.features[:,ife])
+        elif plot_type == 'corners':
+            ax.scatter(self.points[:,0], self.points[:,1], self.points[:,2], c = self.features[:,ife])
+
+        ax.set_xlim3d(0, self.vol_shape[0])
+        ax.set_ylim3d(0, self.vol_shape[1])
+        ax.set_zlim3d(0, self.vol_shape[2])    
+        return    
+    
     
 if __name__ == "__main__":
     
