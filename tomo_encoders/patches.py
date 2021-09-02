@@ -574,7 +574,9 @@ class Patches():
 
         ax.set_xlim3d(0, self.vol_shape[0])
         ax.set_ylim3d(0, self.vol_shape[1])
-        ax.set_zlim3d(0, self.vol_shape[2])    
+        ax.set_zlim3d(0, self.vol_shape[2])  
+        if self.feature_names is not None:
+            fig.suptitle(self.feature_names[ife], fontsize = 16)
         return    
     
     
