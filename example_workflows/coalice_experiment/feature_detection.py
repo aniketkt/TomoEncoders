@@ -242,8 +242,28 @@ class SelfSupervisedCAE():
         print("training time = %.2f seconds"%training_time)        
         
         return
-    
-    
+        
+    def detect_changes(self, vol_prev, vol_curr, patches):
+        
+        '''
+        '''
+        t0 = time.time()
+        sub_vols_prev = patches.extract(self._normalize_volume(vol_prev), self.model_size)
+        sub_vols_curr = patches.extract(self._normalize_volume(vol_curr), self.model_size)
+
+        h_prev = self.models["latent_embedder"].predict(sub_vols_prev[...,np.newaxis])
+        h_curr = self.models["latent_embedder"].predict(sub_vols_curr[...,np.newaxis])
+        h_delta = (h_curr - h_prev)**2
+        h_delta = np.mean(h_delta, axis = 1)
+        h_delta = np.sqrt(h_delta)
+        patches.add_features(h_delta.reshape(-1,1), names = ["h_delta"])
+        t1 = time.time()
+        tot_time_fe = t1 - t0
+        print("total time for change detector = %.2f seconds"%tot_time_fe)
+        mse = np.mean(np.power(sub_vols_curr - sub_vols_prev, 2), axis = (1,2,3))
+        patches.add_features(mse.reshape(-1,1), names = ["mse"])
+        
+        return patches
 
 
 if __name__ == "__main__":

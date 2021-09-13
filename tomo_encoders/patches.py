@@ -406,6 +406,18 @@ class Patches():
                        features = np.compress(cond_list, self.features, axis = 0), \
                        names = self.feature_names)
     
+    def copy(self):
+        
+        _fcopy = None if self.features is None else self.features.copy()
+        _names = None if self.feature_names is None else self.feature_names.copy()
+        
+        return Patches(self.vol_shape, initialize_by = "data", \
+                       points = self.points.copy(),\
+                       widths = self.widths.copy(),\
+                       features = _fcopy, \
+                       names = _names)
+        
+    
     def select_by_indices(self, idxs):
 
         '''
@@ -458,6 +470,25 @@ class Patches():
         idxs = np.argsort(feature)
         
         return self.select_by_indices(idxs)
+
+    
+    def select_by_plane(self, plane_axis, plane_idx):
+        '''
+        Select all patches that include a given plane as defined by plane_axis (0, 1 or 2) and plane_idx (index along axis dimension).  
+        
+        Parameters
+        ----------
+        plane_axis : int  
+            plane along which axis  
+        plane_idx : int  
+            plane at which index (along given axis)  
+        '''
+    
+        condlist = np.zeros((len(self.points), 2))
+        condlist[:,0] = plane_idx > self.points[:, plane_axis] # plane_idx is greater than the min corner point
+        condlist[:,1] = plane_idx < self.points[:, plane_axis] + self.widths[:, plane_axis] # plane_idx is smaller than the max corner pt
+        
+        return self.filter_by_condition(condlist)
     
     def select_by_feature(self, n_selections,\
                        feature = None, ife = None,\
@@ -563,9 +594,7 @@ class Patches():
         return slice(s.start + shift, s.stop + shift, s.step)
     
     
-    def plot_3D_feature(self, ife, fig, plot_type = 'centers'):
-
-        ax = fig.add_subplot(projection='3d')
+    def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
         if plot_type == 'centers':
             ax.scatter(self.centers()[:,0], self.centers()[:,1], self.centers()[:,2], c = self.features[:,ife])
@@ -576,7 +605,7 @@ class Patches():
         ax.set_ylim3d(0, self.vol_shape[1])
         ax.set_zlim3d(0, self.vol_shape[2])  
         if self.feature_names is not None:
-            fig.suptitle(self.feature_names[ife], fontsize = 16)
+            ax.set_title(self.feature_names[ife], fontsize = 16)
         return    
     
     
