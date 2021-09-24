@@ -27,6 +27,8 @@ import numpy as np
 import h5py
 import abc
 
+
+
 class AnyDataGetter(metaclass = abc.ABCMeta):
     @abc.abstractmethod
     def reconstruct_window(self):
@@ -56,6 +58,8 @@ class DataGetter(AnyDataGetter):
     
         self._read_flat_field()
         self._read_proj_stats()
+        
+        
         print("Shape of projection image: %s"%str(self.flat.shape))
         return
 
@@ -74,16 +78,19 @@ class DataGetter(AnyDataGetter):
             self.dark = self.dark[np.newaxis,...]
         return
         
-    def _get_projections_180deg(self, istart):
+    def _get_projections_180deg(self, istart, vert_slice = None):
         s = slice(istart, istart + self.nproj)
+        if vert_slice is None:
+            vert_slice = slice(None,None,None)
+        
         with h5py.File(self.fname, 'r') as hf:
             theta = np.asarray(hf['exchange/theta'][s,...])
-            proj = np.asarray(hf['exchange/data'][s,...])        
+            proj = np.asarray(hf['exchange/data'][s,vert_slice,...])        
             
         if theta.size != self.nproj:
             raise ValueError("full 180 not available for given istart")
         else:
-            proj = normalize(proj, self.flat, self.dark)
+            proj = normalize(proj, self.flat[:, vert_slice,...], self.dark[:, vert_slice,...])
             return proj, theta
         
     def _get_projections_opposing(self, istart, blur_kernel = 3):
@@ -127,7 +134,7 @@ class DataGetter(AnyDataGetter):
         return center_val
     
     
-    def reconstruct_window(self, istart, rot_center, mask_ratio = 0.95, contrast_s = 0.01):
+    def reconstruct_window(self, istart, rot_center, mask_ratio = 0.95, contrast_s = 0.01, vert_slice = None):
 
         '''
         reconstruct over a sliding window starting at index istart and ending at the opposing angle (180 spin).  
@@ -146,14 +153,15 @@ class DataGetter(AnyDataGetter):
         
         '''
         
-        proj, theta = self._get_projections_180deg(istart)
+        proj, theta = self._get_projections_180deg(istart, vert_slice = vert_slice)
         
         if theta[-1] - theta[0] != 180.0:
             raise ValueError("theta values don't seem right")
-        else:
-            theta = angles(proj.shape[0]) # or theta = theta.size
-            # TO-DO DO NOT GENERATE ANGLES, READ THEM FROM STREAM
-        
+#         else:
+#             theta = angles(proj.shape[0]) # or theta = theta.size
+#             # TO-DO DO NOT GENERATE ANGLES, READ THEM FROM STREAM
+            
+        theta = np.radians(theta)
         proj = minus_log(proj)
         
         
@@ -182,8 +190,6 @@ class DataGetter(AnyDataGetter):
             rec = np.clip(rec, *h)
         
         return rec
-    
-
     
 # for center finding    
 def match_opposing(center_guess, proj = None, roi_width = None, metric = 'NCC'):
@@ -301,22 +307,55 @@ def modified_autocontrast(vol, s = 0.01):
 
 if __name__ == "__main__":
     
-    print('just a bunch of functions')
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    mpl.use('Agg')
     
-#     import argparse
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('-f', "--input-fname", required = True, type = str, help = "Path to tiff folder or hdf5 file")
-#     parser.add_argument('-i', "--stats_only", required = False, action = "store_true", default = False, help = "show stats only")
-#     parser.add_argument('-v', "--verbosity", required = False, type = int, default = 0, help = "read / write verbosity; 0 - silent, 1 - important stuff, 2 - print everything")
-#     parser.add_argument('-g', "--center_guess", required = False, type = int, default = 0, help = "initial guess is horizontal center of projection if not provided")
-#     parser.add_argument('--search_width', required = False, type = int, default = 50, help = "search width around guessed center, e.g. default width of 50 and guess of 600 will search on range 550 - 650")
-#     parser.add_argument('--roi_width', required = False, type = float, default = 0.8, help = "fraction of horizontal roi to use for cross correlation match")
-#     parser.add_argument('--metric', required = False, type = str, default = "NCC", help = "metric can be MSE or NCC. NCC is preferrred")
-#     parser.add_argument('--procs', required = False, type = int, default = 12, help = "number of processes to spawn for multiprocessing")
-#     args = parser.parse_args()
+    fnames = ['/data02/MyArchive/coalice/melting_086.h5', \
+              '/data02/MyArchive/coalice/flat_fields_melting_086.h5', \
+              '/data02/MyArchive/coalice/dark_fields_melting_086.h5']
+    ntheta = 361 # these many projections per 180 degree spin
+    recon_params = {"mask_ratio" : None, \
+                    "contrast_s" : 0.005, "vert_slice" : slice(300,302,None)}
+    recon_path = '/data02/MyArchive/coalice/recons'    
+    
+    hf = h5py.File(fnames[0], 'r')
+    delta_t = hf['measurement/instrument/detector/exposure_time'][:]
+    # pixel_size = hf['measurement/instrument/detector/pixel_size'][:]
+    hf.close()    
 
-#     if args.stats_only:
-#         print("not implemented")
-#     else:
-#         main(args)
- 
+    dget = DataGetter(*fnames, ntheta)
+    imgs = []
+    t_vals = []
+    center_val = dget.find_center(0)    
+    
+    from tqdm import trange
+    for idx in trange(200):
+        true_idx = 90*idx
+        img_t = dget.reconstruct_window(true_idx,center_val, **recon_params)[0]
+        imgs.append(img_t)
+        t_vals.append(true_idx*delta_t)
+
+    save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/fullfield_video'
+    
+    
+    for ii in trange(len(imgs)):
+        fig, ax = plt.subplots(1,1)
+        ax.imshow(imgs[ii], cmap = 'gray')
+        ax.axis('off')
+        ax.text(30,50,'t = %2.0f secs'%t_vals[ii])
+        plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
+        plt.close()
+
+    save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/zoomed_video'
+    for ii in trange(len(imgs)):
+        scrop = slice(400,600,None)
+        fig, ax = plt.subplots(1,1)
+        ax.imshow(imgs[ii][scrop, scrop], cmap = 'gray')
+        ax.axis('off')
+        ax.text(15,25,'t = %2.0f secs'%t_vals[ii])
+        plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
+        plt.close()
+        
+        
+        

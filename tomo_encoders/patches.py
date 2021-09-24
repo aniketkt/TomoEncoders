@@ -27,6 +27,8 @@ import numpy as np
 from numpy.random import default_rng
 import h5py
 import abc
+import tensorflow as tf
+from tensorflow.keras.layers import UpSampling3D
 
 
 class Patches():
@@ -46,6 +48,7 @@ class Patches():
         
         initializers = {"data" : self._check_data, \
                         "grid" : self._set_grid, \
+                        "regular-grid" : self._set_regular_grid, \
                         "multiple-grids" : self._set_multiple_grids, \
                         "random-fixed-width" : self._get_random_fixed_width, \
                         "random" : self._get_random}
@@ -197,7 +200,6 @@ class Patches():
 
         return tuple([patch_size[ii]*stride for ii in range(3)])
         
-
     def _set_multiple_grids(self, min_patch_size = None, \
                           max_stride = None, n_points = None):
         '''
@@ -262,6 +264,42 @@ class Patches():
         
         return np.asarray(points), np.asarray(widths), False
 
+    def _set_regular_grid(self, patch_size = None, stride = None):
+
+        '''
+        Initialize (n,3) points on the corner of volume patches placed on a grid. No overlap is used. Instead, the volume is cropped such that it is divisible by the patch_size in that dimension.  
+        
+        Parameters  
+        ----------  
+        patch_size : tuple  
+            A tuple of widths (or the smallest possible values thereof) of the patch volume  
+            
+        stride : int  
+            Effectively multiplies the patch size by factor of stride.    
+        
+        '''
+        
+        patch_size = self._check_stride(patch_size, stride)
+
+        
+        # Find optimum number of patches to cover full image
+        mz, my, mx = self.vol_shape
+        pz, py, px = patch_size
+        
+        nz, ny, nx = int(mz//pz), int(my//py), int(mx//px)
+        stepsize = patch_size
+        nsteps = (nz, ny, nx)
+        
+        points = []
+        for ii in range(nsteps[0]):
+            for jj in range(nsteps[1]):
+                for kk in range(nsteps[2]):
+                    points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
+        widths = [list(patch_size)]*len(points)
+        
+        return np.asarray(points), np.asarray(widths), False
+    
+    
     def _get_random_fixed_width(self, patch_size = None, n_points = None, stride = None):
         """
         Generator that yields randomly sampled data pairs of number = batch_size.
@@ -417,6 +455,31 @@ class Patches():
                        features = _fcopy, \
                        names = _names)
         
+
+    def rescale(self, fac, new_vol_shape):
+        '''
+        '''
+        
+        _fcopy = None if self.features is None else self.features.copy()
+        _names = None if self.feature_names is None else self.feature_names.copy()
+        
+        fac = int(fac)
+        px_max = np.max(self.points, axis = 0)*fac
+        extra_pix = np.asarray(new_vol_shape) - px_max
+        
+#         cond0 = extra_pix < 0
+#         cond1 = extra_pix > 1
+#         cond_fin = cond0 | cond1
+        cond_fin = extra_pix < 0
+        
+        if np.any(cond_fin):
+            raise ValueError("new volume shape is inappropriate")
+        else:
+            return Patches(new_vol_shape, initialize_by = "data", \
+                           points = self.points.copy()*fac,\
+                           widths = self.widths.copy()*fac,\
+                           features = _fcopy, \
+                           names = _names)
     
     def select_by_indices(self, idxs):
 
@@ -470,7 +533,6 @@ class Patches():
         idxs = np.argsort(feature)
         
         return self.select_by_indices(idxs)
-
     
     def select_by_plane(self, plane_axis, plane_idx):
         '''
@@ -579,20 +641,29 @@ class Patches():
         # calculate binning
         bin_vals = self._calc_binning(patch_size)
         # make a list of slices
-        s = self.slices(binning = bin_vals)
+        s = self.slices()
+        
+        # set gpu for upsampling
+        
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            try:
+                mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
+                tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+            except RuntimeError as e:
+                print(e)        
+                
         for ii in range(len(self.points)):
-            if upsample:
-                for ibin in range(bin_vals[ii]):
-                    vol[self._slice_shift(s[ii,0], ibin),\
-                        self._slice_shift(s[ii,1], ibin),\
-                        self._slice_shift(s[ii,2], ibin)] = sub_vols[ii]
-            else:
-                vol[s[ii,0],s[ii,1],s[ii,2]] = sub_vols[ii]
+            
+            vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
+            vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
+            vol_out = vol_out[0,...,0]
+            vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
+                
         return vol
 
-    def _slice_shift(self, s, shift):
-        return slice(s.start + shift, s.stop + shift, s.step)
-    
+#     def _slice_shift(self, s, shift):
+#         return slice(s.start + shift, s.stop + shift, s.step)
     
     def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
