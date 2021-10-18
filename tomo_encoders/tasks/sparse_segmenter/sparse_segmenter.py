@@ -216,6 +216,16 @@ class SparseSegmenter():
 
             yield x, y           
         
+    
+    def train_from_disk(self, X_paths, Y_paths, batch_size, sampling_method, n_epochs,\
+                                 random_rotate = False,\
+                                 add_noise = 0.1,\
+                                 max_stride = 1):
+        raise NotImplementedError("not yet implemented ...")
+        return
+        
+    
+    
     def train(self, X, Y, batch_size, sampling_method, n_epochs,\
                                  random_rotate = False,\
                                  add_noise = 0.1,\
