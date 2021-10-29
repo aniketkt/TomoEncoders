@@ -65,6 +65,10 @@ class Patches():
             self.add_features(features, names)
             return
 
+        
+    def __len__(self):
+        return len(self.points)
+    
     def dump(self, fpath):
         # create df from points, widths, features
         
@@ -74,7 +78,7 @@ class Patches():
             hf.create_dataset("widths", data = self.widths)
             if self.features is not None:
                 hf.create_dataset("features", data = self.features)
-            if len(self.feature_names) > 0:
+            if any(self.feature_names):
                 hf.create_dataset("feature_names", data = np.asarray(self.feature_names, dtype = 'S'))
         return
     
@@ -127,7 +131,7 @@ class Patches():
             self.features = features
             
         # handle feature names here
-        cond1 = len(self.feature_names) != 0
+        cond1 = any(self.feature_names)
         cond2 = len(names) != features.shape[-1]
         if cond1 and cond2:
             raise ValueError("feature array and corresponding names input are not compatible")
@@ -414,7 +418,7 @@ class Patches():
         
         '''
         
-        if self.feature_names is None: raise ValueError("feature names must be defined first.")
+        if not any(self.feature_names): raise ValueError("feature names must be defined first.")
         out_list = []
         for name in names:
             out_list.append(self.features[:,self.feature_names.index(name)])
@@ -441,13 +445,13 @@ class Patches():
         return Patches(self.vol_shape, initialize_by = "data", \
                        points = np.compress(cond_list, self.points, axis = 0),\
                        widths = np.compress(cond_list, self.widths, axis = 0),\
-                       features = np.compress(cond_list, self.features, axis = 0), \
-                       names = self.feature_names)
+                       features = None if self.features is None else np.compress(cond_list, self.features, axis = 0), \
+                       names = self.feature_names if any(self.feature_names) else [])
     
     def copy(self):
         
         _fcopy = None if self.features is None else self.features.copy()
-        _names = None if self.feature_names is None else self.feature_names.copy()
+        _names = self.feature_names.copy() if any(self.feature_names) else []
         
         return Patches(self.vol_shape, initialize_by = "data", \
                        points = self.points.copy(),\
@@ -461,7 +465,7 @@ class Patches():
         '''
         
         _fcopy = None if self.features is None else self.features.copy()
-        _names = None if self.feature_names is None else self.feature_names.copy()
+        _names = self.feature_names.copy() if any(self.feature_names) else []
         
         fac = int(fac)
         px_max = np.max(self.points, axis = 0)*fac
@@ -492,10 +496,10 @@ class Patches():
         '''
         
         return Patches(self.vol_shape, initialize_by = "data", \
-                       points = self.points[idxs],\
-                       widths = self.widths[idxs],\
-                       features = self.features[idxs], \
-                       names = self.feature_names)
+                       points = self.points[idxs].copy(),\
+                       widths = self.widths[idxs].copy(),\
+                       features = None if self.features is None else self.features[idxs].copy(), \
+                       names =  self.feature_names if any(self.feature_names) else [])
         
     def select_random_sample(self, n_points):
         

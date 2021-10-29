@@ -21,16 +21,7 @@ def minus_log(data):
     data = -cp.log(cp.maximum(data, 1e-6))
     return data
 
-def fbp_filter(data):
-    """FBP filtering of projections"""
-    t = rfftfreq(data.shape[2])
-    wfilter = t #* (1 - t * 2)**3  # parzen
-    wfilter = cp.tile(wfilter, [data.shape[1], 1])
-    # loop over slices to minimize fft memory overhead
-    for k in range(data.shape[0]):
-        data[k] = irfft(
-            wfilter*rfft(data[k], overwrite_x=True, axis=1), overwrite_x=True, axis=1)
-    return data
+
 
 source = """
 extern "C" {
@@ -74,6 +65,34 @@ def rec(data, theta, center, stx, px, sty, py, stz, pz):
 
 
 
+# def fbp_filter(data):
+#         '''
+#         FBP filtering of projections
+#         '''
+        
+#         ntheta, nz, n = data.shape
+        
+#         ne = 3*n//2
+#         t = cp.fft.rfftfreq(ne).astype('float32')
+#         w = t * (1 - t * 2)**3  # parzen
+# #         w = w*cp.exp(2*cp.pi*1j*t*(center-n/2)) # center fix
+#         data = cp.pad(data,((0,0),(0,0),(ne//2-n//2,ne//2-n//2)),mode='edge')
+#         data = irfft(
+#             w*rfft(data, axis=2), axis=2).astype('float32')  # note: filter works with complex64, however, it doesnt take much time
+#         data = data[:,:,ne//2-n//2:ne//2+n//2]
+#         return data
+def fbp_filter(data):
+    """FBP filtering of projections"""
+    t = rfftfreq(data.shape[2])
+    wfilter = t #* (1 - t * 2)**3  # parzen
+    wfilter = cp.tile(wfilter, [data.shape[1], 1])
+    # loop over slices to minimize fft memory overhead
+    for k in range(data.shape[0]):
+        data[k] = irfft(
+            wfilter*rfft(data[k], overwrite_x=True, axis=1), overwrite_x=True, axis=1)
+    return data
+
+    
 def recon_patch(projs, theta, center, point, width, mem_limit_gpu = 5.0, apply_fbp = True):
     
     '''
@@ -105,9 +124,18 @@ def recon_patch(projs, theta, center, point, width, mem_limit_gpu = 5.0, apply_f
     # first crop the projections along z
     projs = projs[:, sz, :].copy()
     
-    # pad values
-    padding = int(projs.shape[-1]*(3/8.0))
+    
+    # make sure the width of projection is divisible by four after padding
+    proj_w = projs.shape[-1]
+    tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
+    tot_width = int(np.ceil(tot_width/8)*8) 
+    padding = int((tot_width - proj_w)//2)
+    
+    
     projs = np.pad(projs, ((0,0),(0,0),(padding, padding)), mode = 'edge')
+    
+    
+    # TO-DO: for loop in z-direction
     
     # send to gpu; check if memory limit is crossed  
     # Q: what should be memory limit?  
@@ -119,6 +147,7 @@ def recon_patch(projs, theta, center, point, width, mem_limit_gpu = 5.0, apply_f
         if apply_fbp:
             data = fbp_filter(data) # need to apply filter to full projection  
             data = data #- cp.mean(data, axis = (0,2))
+        print(data.shape)
         center = cp.float32(center)    
     
     # st* - start, p* - number of points
@@ -128,7 +157,7 @@ def recon_patch(projs, theta, center, point, width, mem_limit_gpu = 5.0, apply_f
     obj = rec(data, theta, center+padding, \
               stx+padding, px, \
               sty+padding, py, \
-              0, pz) # 0 since projections were cropped vertically
+              0,           pz) # 0 since projections were cropped vertically
     cp.cuda.stream.get_current_stream().synchronize()
     print(time.time()-st)
     
@@ -138,4 +167,5 @@ def recon_patch(projs, theta, center, point, width, mem_limit_gpu = 5.0, apply_f
 if __name__ == "__main__":
     
     print('just a bunch of functions')
+
     
