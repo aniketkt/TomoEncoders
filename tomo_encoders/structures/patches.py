@@ -31,6 +31,12 @@ import tensorflow as tf
 from tensorflow.keras.layers import UpSampling3D
 
 
+
+
+
+
+
+
 class Patches():
     
     def __init__(self, vol_shape, initialize_by = "data", \
@@ -196,13 +202,14 @@ class Patches():
         
         # TO-DO: Increasing stride size also increase overlap. At maximum stride, the overlap is nearly the width of the patch, which is weird. Handle this. Perhaps show a warning.  
         
+        _ndims = len(self.vol_shape)
         if stride is None: return patch_size
         
-        max_possible_stride = min([self.vol_shape[ii]//patch_size[ii] for ii in range(len(self.vol_shape))])
+        max_possible_stride = min([self.vol_shape[ii]//patch_size[ii] for ii in range(_ndims)])
         if stride > max_possible_stride:
             raise ValueError("Cannot preserve aspect ratio with given value of zoom_out. Pick lower value.")
 
-        return tuple([patch_size[ii]*stride for ii in range(3)])
+        return tuple([patch_size[ii]*stride for ii in range(_ndims)])
         
     def _set_multiple_grids(self, min_patch_size = None, \
                           max_stride = None, n_points = None):
@@ -249,24 +256,50 @@ class Patches():
 #         import pdb; pdb.set_trace()
         
         # Find optimum number of patches to cover full image
-        mz, my, mx = self.vol_shape
-        pz, py, px = patch_size
-        nx, ny, nz = int(np.ceil(mx/px)), int(np.ceil(my/py)), int(np.ceil(mz/pz))
-        stepx = (mx-px) // (nx-1) if mx != px else 0
-        stepy = (my-py) // (ny-1) if my != py else 0
-        stepz = (mz-pz) // (nz-1) if mz != pz else 0
         
-        stepsize  = (stepz, stepy, stepx)
-        nsteps = (nz, ny, nx)
+        # this was rewritten to accommodate both 2D and 3D patches.
+        # old code commented out below
+        m = list(self.vol_shape)
+        p = list(patch_size)
         
-        points = []
-        for ii in range(nsteps[0]):
-            for jj in range(nsteps[1]):
-                for kk in range(nsteps[2]):
-                    points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
+        nsteps = [int(np.ceil(m[i]/p[i])) for i in range(len(m))]
+        
+        stepsize = []
+        for i in range(len(nsteps)):
+            _s = (m[i]-p[i]) // (nsteps[i]-1) if m[i] != p[i] else 0
+            stepsize.append(_s)
+
+
+        points = []            
+        if len(nsteps) == 3:
+            for ii in range(nsteps[0]):
+                for jj in range(nsteps[1]):
+                    for kk in range(nsteps[2]):
+                        points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
+        elif len(nsteps) == 2:
+            for ii in range(nsteps[0]):
+                for jj in range(nsteps[1]):
+                    points.append([ii*stepsize[0], jj*stepsize[1]])
+        
         widths = [list(patch_size)]*len(points)
-        
         return np.asarray(points), np.asarray(widths), False
+            
+#         mz, my, mx = self.vol_shape
+#         pz, py, px = patch_size
+#         nx, ny, nz = int(np.ceil(mx/px)), int(np.ceil(my/py)), int(np.ceil(mz/pz))
+#         stepx = (mx-px) // (nx-1) if mx != px else 0
+#         stepy = (my-py) // (ny-1) if my != py else 0
+#         stepz = (mz-pz) // (nz-1) if mz != pz else 0
+#         stepsize  = (stepz, stepy, stepx)
+#         nsteps = (nz, ny, nx)
+        
+#         points = []
+#         for ii in range(nsteps[0]):
+#             for jj in range(nsteps[1]):
+#                 for kk in range(nsteps[2]):
+#                     points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
+#         widths = [list(patch_size)]*len(points)
+#         return np.asarray(points), np.asarray(widths), False
 
     def _set_regular_grid(self, patch_size = None, stride = None):
 
@@ -287,20 +320,24 @@ class Patches():
 
         
         # Find optimum number of patches to cover full image
-        mz, my, mx = self.vol_shape
-        pz, py, px = patch_size
+        m = list(self.vol_shape)
+        p = list(patch_size)
         
-        nz, ny, nx = int(mz//pz), int(my//py), int(mx//px)
+        nsteps = [int(m[i]//p[i]) for i in range(len(m))]
         stepsize = patch_size
-        nsteps = (nz, ny, nx)
         
         points = []
-        for ii in range(nsteps[0]):
-            for jj in range(nsteps[1]):
-                for kk in range(nsteps[2]):
-                    points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
-        widths = [list(patch_size)]*len(points)
+        if len(m) == 3:
+            for ii in range(nsteps[0]):
+                for jj in range(nsteps[1]):
+                    for kk in range(nsteps[2]):
+                        points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
+        elif len(m) == 2:
+            for ii in range(nsteps[0]):
+                for jj in range(nsteps[1]):
+                    points.append([ii*stepsize[0], jj*stepsize[1]])
         
+        widths = [list(patch_size)]*len(points)
         return np.asarray(points), np.asarray(widths), False
     
     
@@ -320,10 +357,11 @@ class Patches():
             size of the batch (number of patches to be extracted per batch)
 
         """
+        _ndim = len(self.vol_shape)
         patch_size = self._check_stride(patch_size, stride)
         
         points = np.asarray([np.random.randint(0, self.vol_shape[ii] - patch_size[ii], n_points) \
-                           for ii in range(3)]).T
+                           for ii in range(_ndim)]).T
         widths = np.asarray([list(patch_size)]*n_points)
         return np.asarray(points), np.asarray(widths), False
     
@@ -343,13 +381,14 @@ class Patches():
             size of the batch (number of patches to be extracted per batch)  
 
         """
+        _ndim = len(self.vol_shape)
         _ = self._check_stride(min_patch_size, max_stride) # check max stride before going into the loop
         random_strides = np.random.randint(1, max_stride, n_points)
         points = []
         widths = []
         for stride in random_strides:
             curr_patch_size = self._check_stride(min_patch_size, stride)
-            points.append([np.random.randint(0, self.vol_shape[ii] - curr_patch_size[ii]) for ii in range(3)])    
+            points.append([np.random.randint(0, self.vol_shape[ii] - curr_patch_size[ii]) for ii in range(_ndim)])    
             widths.append(list(curr_patch_size))
 
         points = np.asarray(points)
@@ -375,7 +414,8 @@ class Patches():
     def _points_to_slices(self, a, w, b):
         
         # b is binning, a is the array of start values and w = stop - start (width)
-        return [[slice(a[ii,jj], a[ii,jj] + w[ii,jj], b[ii]) for jj in range(3)] for ii in range(len(a))]
+        _ndim = len(self.vol_shape)
+        return [[slice(a[ii,jj], a[ii,jj] + w[ii,jj], b[ii]) for jj in range(_ndim)] for ii in range(len(a))]
     
     def slices(self, binning = None):
         '''  
@@ -406,8 +446,8 @@ class Patches():
             each element of the array is the z, y, x coordinate of the center of the patch volume.    
         
         '''  
-        
-        s = [[int(self.points[ii,jj] + self.widths[ii,jj]//2) for jj in range(3)] for ii in range(len(self.points))]
+        _ndim = len(self.vol_shape)
+        s = [[int(self.points[ii,jj] + self.widths[ii,jj]//2) for jj in range(_ndim)] for ii in range(len(self.points))]
         return np.asarray(s)
     
     def features_to_numpy(self, names):
@@ -615,6 +655,7 @@ class Patches():
             shape is (n_pts, patch_z, patch_y, patch_x)  
         
         '''  
+        _ndim = len(self.vol_shape)
         if vol.shape != self.vol_shape:
             raise ValueError("Shape of big volume does not match vol_shape attribute of patches data")
 
@@ -623,7 +664,10 @@ class Patches():
         # make a list of slices
         s = self.slices(binning = bin_vals)
         # make a list of patches
-        sub_vols = [np.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
+        if _ndim == 3:
+            sub_vols = [np.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
+        elif _ndim == 2:
+            sub_vols = [np.asarray(vol[s[ii,0], s[ii,1]]) for ii in range(len(self.points))]
         
         return np.asarray(sub_vols, dtype = vol.dtype)
     
@@ -637,7 +681,7 @@ class Patches():
             shape is (n_pts, patch_z, patch_y, patch_x)  
         
         '''  
-        
+        _ndim = len(self.vol_shape)
         if sub_vols.shape[0] != len(self.points):
             raise ValueError("number of patch points and length of input list of patches must match")
         vol = np.zeros(self.vol_shape, dtype = sub_vols.dtype)
@@ -647,23 +691,29 @@ class Patches():
         # make a list of slices
         s = self.slices()
         
-        # set gpu for upsampling
-        
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
-            try:
-                mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
-                tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
-            except RuntimeError as e:
-                print(e)        
-                
-        for ii in range(len(self.points)):
+        if _ndim == 3:
+            # set gpu for upsampling
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            if gpus:
+                try:
+                    mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
+                    tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+                except RuntimeError as e:
+                    print(e)        
             
-            vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
-            vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
-            vol_out = vol_out[0,...,0]
-            vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
-                
+            for ii in range(len(self.points)):
+                vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
+                vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
+                vol_out = vol_out[0,...,0]
+                vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
+
+        elif _ndim == 2:
+            for ii in range(len(self.points)):
+                vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
+                vol_out = cv2.resize(vol_out, (patch_size[1], patch_size[0]))
+                vol_out = vol_out[0,...,0]
+                vol[s[ii,0],s[ii,1]] = vol_out
+            
         return vol
 
 #     def _slice_shift(self, s, shift):
@@ -671,6 +721,9 @@ class Patches():
     
     def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
+        if self.vol_shape != 3:
+            raise NotImplementedError("implemented only for 3D patches")
+        
         if plot_type == 'centers':
             ax.scatter(self.centers()[:,0], self.centers()[:,1], self.centers()[:,2], c = self.features[:,ife])
         elif plot_type == 'corners':
