@@ -407,7 +407,7 @@ class SparseSegmenter():
         print("Total time for segmentation at stride %i: %.2f seconds"%(upsample, tot_time))
         return Y
 
-    
+        
     
     
 #     def sparse_segment(self, X, max_stride = 4):
