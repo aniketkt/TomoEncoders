@@ -11,8 +11,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from ct_segnet.data_utils import patch_maker as PM
-# from ImageStackPy import ImageProcessing as IP
+
 
 from mpl_toolkits.axes_grid1.anchored_artists import AnchoredSizeBar
 import matplotlib.font_manager as fm

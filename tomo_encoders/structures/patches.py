@@ -15,10 +15,8 @@ import numpy as np
 from skimage.feature import match_template
 import h5py
 
-from tomopy import normalize, minus_log, angles, recon, circ_mask
-from scipy.ndimage.filters import median_filter
-
-# from patch_maker_3D import *
+# from tomopy import normalize, minus_log, angles, recon, circ_mask
+# from scipy.ndimage.filters import median_filter
 
 from multiprocessing import Pool, cpu_count
 import functools

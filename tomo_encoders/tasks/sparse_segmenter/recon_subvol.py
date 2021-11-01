@@ -168,7 +168,6 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     cond2 = projs.shape[-1] != vol_shape[2]
     if any([cond0, cond1, cond2]):
         raise ValueError("vol_shape and projections array are incompatible")
-    if (projs.shape[-1] != vol_shape[1]) or (projs.shape[-1] != vol_shape[1])
     
     # assume z-widths are all same
     if np.std(p3d.widths[:,0]) > 0.0:
@@ -212,7 +211,7 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     
     
     
-def recon_chunk(projs, theta, center, p2d, apply_fbp = True, nzc = 4):
+def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
     
     '''
     reconstruct a region within full volume defined by 2d patches with corner points (y, x) and widths (wy, wx) and a height  
@@ -246,7 +245,7 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True, nzc = 4):
     
     theta = cp.array(theta, dtype = 'float32')
     if apply_fbp:
-        data = fbp_filter(projs, nzc = nzc) # need to apply filter to full projection  
+        data = fbp_filter(projs) # need to apply filter to full projection  
         print(data.shape)
     else:
         data = cp.array(projs)
