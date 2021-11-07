@@ -12,27 +12,16 @@ import glob
 import numpy as np
 
 
-from skimage.feature import match_template
 import h5py
-
-# from tomopy import normalize, minus_log, angles, recon, circ_mask
-# from scipy.ndimage.filters import median_filter
+import cupy as cp
 
 from multiprocessing import Pool, cpu_count
 import functools
 
-import numpy as np
 from numpy.random import default_rng
-import h5py
 import abc
 import tensorflow as tf
 from tensorflow.keras.layers import UpSampling3D
-
-
-
-
-
-
 
 
 class Patches():
@@ -266,7 +255,6 @@ class Patches():
         for i in range(len(nsteps)):
             _s = (m[i]-p[i]) // (nsteps[i]-1) if m[i] != p[i] else 0
             stepsize.append(_s)
-
 
         points = []            
         if len(nsteps) == 3:
@@ -653,6 +641,8 @@ class Patches():
             shape is (n_pts, patch_z, patch_y, patch_x)  
         
         '''  
+        xp = cp.get_array_module(vol)
+        
         _ndim = len(self.vol_shape)
         if vol.shape != self.vol_shape:
             raise ValueError("Shape of big volume does not match vol_shape attribute of patches data")
@@ -663,11 +653,11 @@ class Patches():
         s = self.slices(binning = bin_vals)
         # make a list of patches
         if _ndim == 3:
-            sub_vols = [np.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
+            sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
         elif _ndim == 2:
-            sub_vols = [np.asarray(vol[s[ii,0], s[ii,1]]) for ii in range(len(self.points))]
+            sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1]]) for ii in range(len(self.points))]
         
-        return np.asarray(sub_vols, dtype = vol.dtype)
+        return xp.asarray(sub_vols, dtype = vol.dtype)
     
     def stitch(self, sub_vols, patch_size, upsample = False):
         '''  

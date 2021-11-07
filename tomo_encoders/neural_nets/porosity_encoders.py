@@ -635,7 +635,7 @@ def build_Unet_3D(vol_shape, n_filters = [16,32,64], \
     # upsampling path. e.g. n_blocks = 3
     for ii in range(n_blocks-1, -1, -1):
         # ii is 2, 1, 0
-        print("############# ii = %i"%ii)
+#         print("############# ii = %i"%ii)
         
         decoded = synthesis_block(decoded, \
                                   2*n_filters[ii], \

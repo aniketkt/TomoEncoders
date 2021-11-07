@@ -12,6 +12,7 @@ import h5py
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
 from cupy.fft import rfft, irfft, rfftfreq
+from tomo_encoders import Patches
 
 def darkflat_correction(data, dark, flat):
     """Dark-flat field correction"""
@@ -76,9 +77,7 @@ def rec(data, theta, center, stx, px, sty, py, stz, pz):
                 int(cp.ceil(pz/4))), (16, 16, 4), \
                (obj, data, theta, cp.float32(center), \
                 ntheta, nz, n, stx, px, sty, py, stz, pz))
-    print(status)
     return obj
-
 
 
 def fbp_filter(data):
@@ -88,16 +87,19 @@ def fbp_filter(data):
 #     import pdb; pdb.set_trace()
 #     wfilter = cp.tile(wfilter, [data.shape[1], 1])
     
+#     for k in range(data.shape[0]):
+#         for iz in range(data.shape[1]):
+#             data[k, iz,...] = irfft(wfilter*rfft(data[k, iz,...]))
+    
     for k in range(data.shape[0]):
-        for iz in range(data.shape[1]):
-            data[k, iz,...] = irfft(wfilter*rfft(data[k, iz,...]))
-#     data = irfft(wfilter*rfft(data, overwrite_x=True, axis=2), overwrite_x=True, axis=2)
+
+        data[k] = irfft(wfilter*rfft(data[k], axis=1), axis=1)
     return data
 
-def test_recon_patch(projs, theta, center, point, width, apply_fbp = True):
+def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = True):
     
     '''
-    reconstruct a region within full volume shaped as cuboid, defined corner points (z, y, x) and widths (wz, wy, wx).  
+    reconstruct with binning projections and theta
     
     Parameters
     ----------
@@ -107,48 +109,60 @@ def test_recon_patch(projs, theta, center, point, width, apply_fbp = True):
         array of theta values (length = ntheta)  
     center : float  
         center value for the projection data  
-    point : np.ndarray  
-        array of 3 corner points z, y, x  
-    width : np.ndarray  
-        array of 3 widths wz, wy, wx  
-    
+    theta_binning : int
+        binning of theta
+    yx_binning : int
+        binning of projections
     Returns
     -------
     
     '''
+    device = cp.cuda.Device()
+    memory_pool = cp.cuda.MemoryPool()
+    cp.cuda.set_allocator(memory_pool.malloc)
+    
+    
+    data = cp.array(projs[::theta_binning, ::yx_binning, ::yx_binning].copy())
+    theta = cp.array(theta[::theta_binning], dtype = 'float32')
+    center = cp.float32(center/yx_binning)
+    vol_shape = (data.shape[1], data.shape[2], data.shape[2])
+    
     
     # make sure the width of projection is divisible by four after padding
-    proj_w = projs.shape[-1]
-    tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
-    tot_width = int(np.ceil(tot_width/8)*8) 
+    proj_w = data.shape[-1]
+    tot_width = proj_w*(1 + 0.25*2) # 1/4 padding
+    tot_width = int(np.ceil(tot_width/8.0)*8.0) 
     padding = int((tot_width - proj_w)//2)
-    projs = np.pad(projs, ((0,0),(0,0),(padding, padding)), mode = 'edge')
+    padding_right = tot_width - data.shape[-1] - padding
+    data = cp.pad(data, ((0,0),(0,0),(padding, padding_right)), mode = 'edge')
     
-    stream1 = cp.cuda.Stream(non_blocking=False)
+    stream1 = cp.cuda.Stream(non_blocking=True)
     with stream1:
-        theta = cp.array(theta, dtype = 'float32')
         if apply_fbp:
-            data = fbp_filter(cp.array(projs)) # need to apply filter to full projection  
+            data = fbp_filter(data) # need to apply filter to full projection  
             print(data.shape)
-            print("norm = ", cp.linalg.norm(data[:,0,:]))
-        else:
-            data = cp.array(projs)
+        
+    # wait until above is complete
+    stop_event = stream1.record()
+    stream1.wait_event(stop_event)
 
-        center = cp.float32(center)    
-    stream1.synchronize()
-    
-    stream2 = cp.cuda.Stream(non_blocking=False)
-    with stream2:
+    with stream1:
         # st* - start, p* - number of points
-        stz, sty, stx = point
-        pz, py, px = width
+        stz, sty, stx = (0,0,0)
+        pz, py, px = vol_shape
         st = time.time()
         obj = rec(data, theta, center+padding, \
                   stx+padding, px, \
                   sty+padding, py, \
                   0,           pz) # 0 since projections were cropped vertically
+    stream1.synchronize()
     print(time.time()-st)
-    stream2.synchronize()
+    
+    memory_pool.free_all_blocks(stream=stream1)
+    device.synchronize()
+        
+    print('total bytes', memory_pool.total_bytes())    
+    
     return obj.get()
 
 def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp = True):
@@ -156,11 +170,6 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     
     Assumes the patches are on a regular (non-overlapping) grid.  
     '''
-    
-    # send to gpu; check if memory limit is crossed  
-    # Q: what should be memory limit?  
-    if projs.nbytes/1.0e9 > mem_limit_gpu:
-        raise ValueError("mem limit breached")
     
     vol_shape = p3d.vol_shape
     cond0 = projs.shape[1] != vol_shape[0]
@@ -173,32 +182,29 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     if np.std(p3d.widths[:,0]) > 0.0:
         raise ValueError("all z widths must be same")
     else:
-        z_width = p3d.widths[:,0]
+        z_width = p3d.widths[0,0]
     
     # assume no overlap between patches
     # TO-DO: how to checksum this?
     z_points = p3d.points[:,0]
     
-    
-    
     p2d_sorted = Patches(tuple(vol_shape[1:]), initialize_by = "data", \
                   points = p3d.points[:,1:], \
                   widths = p3d.widths[:,1:])
     p2d_sorted.add_features(z_points.reshape(-1,1), names = ["z_points"])
-    p2d_sorted = p2d.sort_by_feature(ife = 0) # sort in increasing z value
+    p2d_sorted = p2d_sorted.sort_by_feature(ife = 0) # sort in increasing z value
     z_points_unique = np.unique(z_points)    
 
     sub_vols = []
     for icount, z_point in enumerate(z_points_unique):
-        p2d_z = p2d.filter_by_condition(p2d.features[:,0] == z_point)
-        print("index %i, number of patches: %i"%(z_idx, len(p2d_z)))  
-        sub_vols.append(recon_chunk(projs[:,z_point:z_point+z_width], theta, center, p2d_z, apply_fbp = apply_fbp))
-        #TO-DO return both sub_vols and p3d?
+        p2d_z = p2d_sorted.filter_by_condition(p2d_sorted.features[:,0] == z_point)
+        print("index %i, number of patches: %i"%(z_point, len(p2d_z)))  
+        sub_vols.append(recon_chunk(projs[:,z_point:z_point+z_width,:], theta, center, p2d_z, apply_fbp = apply_fbp))
         
-        widths_arr = np.concatenate([np.ones(len(p2d_z),1)*wz, p2d_z.widths], axis = 1)
-        points_arr = np.concatenate([np.ones(len(p2d_z),1)*z_point, p2d_z.points], axis = 1)
+        widths_arr = np.concatenate([np.ones((len(p2d_z),1))*z_width, p2d_z.widths], axis = 1)
+        points_arr = np.concatenate([np.ones((len(p2d_z),1))*z_point, p2d_z.points], axis = 1)
         
-        p3d_new = Patches(vol_shape, initialize_by = "data", \
+        p3d_tmp = Patches(vol_shape, initialize_by = "data", \
                           points = points_arr, widths = widths_arr)
         
         if icount == 0:
@@ -208,7 +214,6 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
         del p3d_tmp
         
     return np.concatenate(sub_vols, axis = 0), p3d_new
-    
     
     
 def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
@@ -235,37 +240,103 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
     -------
     
     '''
+    stream_copy = cp.cuda.Stream()
+    t0_copy = time.time()
+    with stream_copy:
+        data = cp.array(projs)
+    stream_copy.synchronize()
+#     print("time to copy chunk to GPU: %.2f seconds"%(time.time() - t0_copy))
     
+    t1_rec = time.time()
     # make sure the width of projection is divisible by four after padding
-    proj_w = projs.shape[-1]
+    proj_w = data.shape[-1]
     tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
     tot_width = int(np.ceil(tot_width/8)*8) 
     padding = int((tot_width - proj_w)//2)
-    projs = np.pad(projs, ((0,0),(0,0),(padding, padding)), mode = 'edge')
+    data = cp.pad(data, ((0,0),(0,0),(padding, padding)), mode = 'edge')
     
     theta = cp.array(theta, dtype = 'float32')
     if apply_fbp:
-        data = fbp_filter(projs) # need to apply filter to full projection  
+        data = fbp_filter(data) # need to apply filter to full projection  
         print(data.shape)
-    else:
-        data = cp.array(projs)
 
     center = cp.float32(center)    
     
     # st* - start, p* - number of points
     stz = 0
-    pz = projs.shape[1]
+    pz = data.shape[1] # this is 64 as it is a chunk (not full projs)
     sub_vols = []
     for ip in range(len(p2d)):
         sty, stx = p2d.points[ip]
         py, px = p2d.widths[ip]
         
-        sub_vols.append(rec(data, theta, center+padding, \
-                  stx+padding, px, sty+padding, py, stz, pz).get())
+        tmp_rec = rec(data, theta, center+padding, \
+                  stx+padding, px, sty+padding, py, stz, pz)
+        sub_vols.append(tmp_rec.get())
         cp.cuda.stream.get_current_stream().synchronize()
     
-    sub_vols = cp.concatenate(sub_vols, axis = 0)
-    return sub_vols.get()
+#     sub_vols = np.asarray(sub_vols)
+#     print("time to reconstruct on GPU: %.2f seconds"%(time.time() - t1_rec))
+    print("\n")
+    return np.asarray(sub_vols)
+
+######### TRASH - RECON PATCH ##########
+# def test_recon_patch(projs, theta, center, point, width, apply_fbp = True):
+    
+#     '''
+#     reconstruct a region within full volume shaped as cuboid, defined corner points (z, y, x) and widths (wz, wy, wx).  
+    
+#     Parameters
+#     ----------
+#     projs : np.ndarray  
+#         array of projection images shaped as ntheta, nrows, ncols
+#     theta : np.ndarray
+#         array of theta values (length = ntheta)  
+#     center : float  
+#         center value for the projection data  
+#     point : np.ndarray  
+#         array of 3 corner points z, y, x  
+#     width : np.ndarray  
+#         array of 3 widths wz, wy, wx  
+    
+#     Returns
+#     -------
+    
+#     '''
+    
+#     # make sure the width of projection is divisible by four after padding
+#     proj_w = projs.shape[-1]
+#     tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
+#     tot_width = int(np.ceil(tot_width/8)*8) 
+#     padding = int((tot_width - proj_w)//2)
+#     projs = np.pad(projs, ((0,0),(0,0),(padding, padding)), mode = 'edge')
+    
+#     stream1 = cp.cuda.Stream(non_blocking=False)
+#     with stream1:
+#         theta = cp.array(theta, dtype = 'float32')
+#         if apply_fbp:
+#             data = fbp_filter(cp.array(projs)) # need to apply filter to full projection  
+#             print(data.shape)
+#             print("norm = ", cp.linalg.norm(data[:,0,:]))
+#         else:
+#             data = cp.array(projs)
+
+#         center = cp.float32(center)    
+#     stream1.synchronize()
+    
+#     stream2 = cp.cuda.Stream(non_blocking=False)
+#     with stream2:
+#         # st* - start, p* - number of points
+#         stz, sty, stx = point
+#         pz, py, px = width
+#         st = time.time()
+#         obj = rec(data, theta, center+padding, \
+#                   stx+padding, px, \
+#                   sty+padding, py, \
+#                   0,           pz) # 0 since projections were cropped vertically
+#     print(time.time()-st)
+#     stream2.synchronize()
+#     return obj.get()
 
 
 #### TRASH - OLD FFT CODE ###########

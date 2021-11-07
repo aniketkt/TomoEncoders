@@ -12,7 +12,7 @@ import time
 import h5py 
 from tomopy import project 
 sys.path.append('/data02/MyArchive/aisteer_3Dencoders/TomoEncoders/tomo_encoders/tasks/sparse_segmenter/') 
-from recon_subvol import fbp_filter, recon_patch 
+#from recon_subvol import fbp_filter, recon_patch 
 from ct_segnet.data_utils.data_io import DataFile 
 import os 
 import signal 
@@ -22,8 +22,8 @@ import tomocg as pt
 fpath = '/data02/MyArchive/AM_part_Xuan/data/mli_L206_HT_650_L3_rec_1x1_uint16.hdf5' 
 projs_path = '/data02/MyArchive/AM_part_Xuan/projs' 
 if not os.path.exists(projs_path): os.makedirs(projs_path)
-binning = 1 
-ntheta = 3000
+binning = 2 
+ntheta = 1500
 pnz = 4  # number of slices for simultaneous processing in tomography 
 
 
@@ -92,4 +92,4 @@ if __name__ == "__main__":
     with h5py.File(save_fpath, 'w') as hf:
         hf.create_dataset('data', data = projs)
         hf.create_dataset('theta', data = theta)
-        hf.create_dataset('center', data = center)
+        hf.create_dataset('center', data = projs.shape[2]/2)

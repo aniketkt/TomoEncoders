@@ -24,7 +24,7 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.layers import UpSampling3D
 from multiprocessing import Pool, cpu_count
 import functools
-
+import cupy as cp
 import h5py
 import abc
 import time
@@ -45,7 +45,7 @@ class SparseSegmenter():
     def __init__(self,\
                  model_initialization = "define-new", \
                  model_size = (64,64,64), \
-                 descriptor_tag = "misc", **model_params):
+                 descriptor_tag = "misc", gpu_mem_limit = 48.0, **model_params):
         '''
         
         Parameters
@@ -66,9 +66,37 @@ class SparseSegmenter():
             dict contains {"latent_embedder" : encoder_model, "CAE" : denoiser_model}. Here, both models are keras 3D models with input shape = model_size
 
         '''
+        ######### START GPU SETTINGS ############
+        ########### SET MEMORY GROWTH to True ############
+#         physical_devices = tf.config.list_physical_devices('GPU')
+#         try:
+#             tf.config.experimental.set_memory_growth(physical_devices[0], True)
+#         except:
+#             # Invalid device or cannot modify virtual devices once initialized.
+#             pass        
+
+        #### algorithm failed error
+        from tensorflow.compat.v1 import ConfigProto
+        from tensorflow.compat.v1 import InteractiveSession
+        config = ConfigProto()
+        config.gpu_options.allow_growth = True
+        session = InteractiveSession(config=config)
+        
+        ######### RUNTIME GPU USAGE ###########
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        if gpus:
+            try:
+                cfg = tf.config.experimental.VirtualDeviceConfiguration(memory_limit=gpu_mem_limit*1000.0)
+                tf.config.experimental.set_virtual_device_configuration(gpus[0], [cfg])
+            except RuntimeError as e:
+                print(e)        
+        
+        ######### END GPU SETTINGS ############
+
         model_getters = {"load-model" : self._load_models, \
                          "define-new" : self._build_models, \
                          "load-weights" : self._load_weights}
+
         
         # any function chosen must assign self.models, self.model_tag and self.model_size
         
@@ -153,18 +181,7 @@ class SparseSegmenter():
         self.model_tag = "_".join(model_names["segmenter"].split("_")[1:])
         return
 
-    def _normalize_volume(self, vol):
-        '''
-        Normalizes volume to values into range [0,1]  
-
-        '''
-        eps = 1e-12
-        max_val = np.max(vol)
-        min_val = np.min(vol)
-        vol = (vol - min_val) / (max_val - min_val + eps)
-        return vol
-
-    def _read_data_pairs(self, ds_X, ds_Y, s_crops):
+    def _read_data_pairs(self, ds_X, ds_Y, s_crops, normalize_sampling_factor):
         
         print("loading data...")
         X = ds_X.read_full().astype(np.float32)
@@ -174,12 +191,13 @@ class SparseSegmenter():
         Y = Y[s_crops].copy()
         
         # normalize volume, check if shape is compatible.  
-        X = self._normalize_volume(X).astype(np.float16)
+        X = normalize_volume_gpu(X, normalize_sampling_factor = normalize_sampling_factor, chunk_size = 1).astype(np.float16)
+        
         print("done")
         print("Shape X %s, shape Y %s"%(str(X.shape), str(Y.shape)))
         return X, Y
     
-    def load_datasets(self, datasets):
+    def load_datasets(self, datasets, normalize_sampling_factor = 4):
     
         '''
         Parameters  
@@ -199,7 +217,7 @@ class SparseSegmenter():
             ds_Y = DataFile(dataset['fpath_Y'], tiff = False, \
                             data_tag = dataset['data_tag_Y'], VERBOSITY = 0)
             
-            Xs[ii], Ys[ii] = self._read_data_pairs(ds_X, ds_Y, dataset['s_crops'])
+            Xs[ii], Ys[ii] = self._read_data_pairs(ds_X, ds_Y, dataset['s_crops'], normalize_sampling_factor)
             ii += 1
         del ii
         return Xs, Ys
@@ -278,7 +296,7 @@ class SparseSegmenter():
         y = patches.extract(Y, self.model_size)[...,np.newaxis]            
         x = patches.extract(X, self.model_size)[...,np.newaxis]
         std_batch = np.random.uniform(0, add_noise, batch_size)
-        x = y + np.asarray([np.random.normal(0, std_batch[ii], y.shape[1:]) for ii in range(batch_size)])
+        x = x + np.asarray([np.random.normal(0, std_batch[ii], x.shape[1:]) for ii in range(batch_size)])
 
         if random_rotate:
             nrots = np.random.randint(0, 4, batch_size)
@@ -289,37 +307,6 @@ class SparseSegmenter():
 #         print("DEBUG: shape x %s, shape y %s"%(str(x.shape), str(y.shape)))
         
         return x, y
-    
-    
-#     def _get_xy(self, X, Y, sampling_method, max_stride, batch_size, add_noise, random_rotate):
-        
-        
-#         if sampling_method in ["grid", "random-fixed-width"]:
-#             patches = Patches(X.shape, initialize_by = sampling_method, \
-#                               patch_size = self.model_size, \
-#                               stride = max_stride, \
-#                               n_points = batch_size)    
-
-#         elif sampling_method in ["random"]:
-#             patches = Patches(X.shape, initialize_by = sampling_method, \
-#                               min_patch_size = self.model_size, \
-#                               max_stride = max_stride, \
-#                               n_points = batch_size)    
-
-#         y = patches.extract(Y, self.model_size)[...,np.newaxis]
-#         x = patches.extract(X, self.model_size)[...,np.newaxis]
-#         std_batch = np.random.uniform(0, add_noise, batch_size)
-#         x = y + np.asarray([np.random.normal(0, std_batch[ii], y.shape[1:]) for ii in range(batch_size)])
-
-#         if random_rotate:
-#             nrots = np.random.randint(0, 4, batch_size)
-#             for ii in range(batch_size):
-#                 axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
-#                 x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
-#                 y[ii, ..., 0] = np.rot90(y[ii, ..., 0], k=nrots[ii], axes=axes)
-# #         print("DEBUG: shape x %s, shape y %s"%(str(x.shape), str(y.shape)))
-        
-#         return x, y
     
     def data_generator(self, Xs, Ys, batch_size, sampling_method, max_stride = 1, random_rotate = False, add_noise = 0.1, cutoff = 0.0):
 
@@ -360,6 +347,77 @@ class SparseSegmenter():
             yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), \
             np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
                 
+    
+    def _predict_patches(self, x, chunk_size, out_arr, min_max = None):
+
+        t0 = time.time()
+        nb = len(x)
+        nchunks = int(np.ceil(nb/chunk_size))
+        nb_padded = nchunks*chunk_size
+        padding = nb_padded - nb
+
+        if out_arr is None:
+            out_arr = np.empty_like(x) # use numpy since return from predict is numpy
+        else:
+            # to-do: check dims
+            pass
+
+        for k in range(nchunks):
+
+            sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
+            x_in = x[sb,...]
+
+            if padding != 0:
+                if k == nchunks - 1:
+                    x_in = np.pad(x_in, ((0,padding), (0,0), (0,0), (0,0), (0,0)), mode = 'constant')
+
+                if min_max is not None:
+                    min_val, max_val = min_max
+                    x_in = _rescale_data(x_in, float(min_val), float(max_val))
+
+                x_out = self.models['segmenter'].predict(x_in)
+
+                if k == nchunks -1:
+                    x_out = x_out[:-padding,...]
+            else:
+
+                if min_max is not None:
+                    min_val, max_val = min_max
+                    x_in = _rescale_data(x_in, float(min_val), float(max_val))
+
+                x_out = self.models['segmenter'].predict(x_in)
+            out_arr[sb,...] = x_out
+
+        t_unit = (time.time() - t0)*1000.0/nb
+        print("inf. time p. input patch = %.2f ms, nb = %i"%(t_unit, nb))        
+        print("\n")
+        return out_arr
+    
+    def segment_volume(self, X, Y, patches, batch_size = 32, normalize_sampling_factor = 2):
+        
+        t0 = time.time()
+        x = patches.extract(X, self.model_size)
+        x = x[...,np.newaxis]
+        
+        t01 = time.time()
+        print("time for extracting %i patches: "%len(x), t01-t0)
+        
+        min_max = _find_min_max(vol, normalize_sampling_factor)
+        x = self.predict_patches(x, batch_size, None, min_max = min_max)
+        x = x.astype(np.uint8)
+        x = x[...,0]  
+        t02 = time.time()
+        print("\ntime for predicting on %i patches: "%len(x), t02-t01)
+        
+        s = patches.slices()
+        for idx in range(len(patches.points)):
+                Y[s[idx,0], s[idx,1], s[idx,2]] = x[idx,...]
+        tot_time = time.time() - t0
+        print("Total time for segmentation: %.2f seconds"%(tot_time))
+        return Y
+
+    
+
     def sparse_segment(X):
         raise NotImplementedError("not implemented")
         
@@ -379,35 +437,90 @@ class SparseSegmenter():
         msk[:,:,:-1][tmp] = 1
         msk[:,:,1:][tmp] = 1
         return msk > 0
+    
+    
+    
+######### TO-DO: upsampling part #################    
+    
+#     def _predict_data_generator(self, x, n_splits):
+            
+#         stepsize = len(x)//n_splits
+#         i_start = 0
+#         stepsize = int(np.ceil(len(x)/n_splits))
         
-    def _segment_patches(self, X, Y, patches, upsample = 1, arr_split_infer = 1):
+#         i_counter = 0
+#         while slice_start < len(x):
+            
+#             i_end = min(i_start + stepsize, len(x))
+#             x_set = x[i_start:i_end]#.copy()
+#             i_start = i_end
+#             print(i_counter)
+#             i_counter += 1
+#             yield x_set
+    
+#     def _segment_patches_mproc(self, X, Y, patches, arr_split_infer = 1, workers = 1):
         
-        t0 = time.time()
-        x = patches.extract(X, self.model_size)
-        x = x[...,np.newaxis]
-        x = np.array_split(x, arr_split_infer)
+#         t0 = time.time()
+#         x = patches.extract(X, self.model_size)
+#         x = x[...,np.newaxis]
+#         t01 = time.time()
+#         print("time for extracting %i patches: "%len(x), t01-t0)
         
-        y_pred = []
-        print("\n")
-        for jj in range(len(x)):
-            tmp = self.models["segmenter"].predict(x[jj])
-            tmp = np.round(tmp).astype(np.uint8)
-            if upsample > 1:
-                tmp = UpSampling3D(size=upsample)(tmp)
-            tmp = tmp[...,0]                    
-            y_pred.append(tmp)
-            print("\rDone %2d of %2d"%(jj+1, len(x)), end = "")
-        print("\n")
-        y_pred = np.concatenate(y_pred, axis = 0)
+#         # shape of x: (n_vols, 64, 64, 64, 1)
+#         pred_dg = self._predict_data_generator(x, arr_split_infer)
+#         y_pred = self.models["segmenter"].predict(pred_dg, steps = arr_split_infer, \
+#                                                   workers = workers, \
+#                                                   use_multiprocessing = False)
+#         y_pred = np.round(y_pred).astype(np.uint8)
+#         y_pred = y_pred[...,0]                    
+#         t02 = time.time()
+#         print("time for predicting on patches: ", t02-t01)
         
-        s = patches.slices()
-        for idx in range(len(patches.points)):
-                Y[s[idx,0], s[idx,1], s[idx,2]] = y_pred[idx,...]
-        tot_time = time.time() - t0
-        print("Total time for segmentation at stride %i: %.2f seconds"%(upsample, tot_time))
-        return Y
-
+#         s = patches.slices()
+#         for idx in range(len(patches.points)):
+#                 Y[s[idx,0], s[idx,1], s[idx,2]] = y_pred[idx,...]
+#         t03 = time.time()
+#         print("time for assigning patches to volume: ", t03-t02)
         
+#         tot_time = time.time() - t0
+#         print("Total time for segmentation: %.2f seconds"%(tot_time))
+#         return Y
+    
+    
+    
+    
+    
+    
+    
+    
+    
+#     def _segment_patches_upsampling(self, X, Y, patches, upsample = 1, arr_split_infer = 1):
+        
+#         t0 = time.time()
+#         x = patches.extract(X, self.model_size)
+#         x = x[...,np.newaxis]
+#         t01 = time.time()
+#         print("time for extracting %i patches: "%len(x), t01-t0)
+        
+#         x = np.array_split(x, arr_split_infer)
+#         for jj in range(len(x)):
+#             tmp = self.models["segmenter"].predict(x[jj])
+#             tmp = np.round(tmp).astype(np.uint8)
+#             if upsample > 1:
+#                 tmp = UpSampling3D(size=upsample)(tmp)
+#             tmp = tmp[...,0]                    
+#             y_pred.append(tmp)
+#             print("\rDone %2d of %2d"%(jj+1, len(x)), end = "")
+        
+#         t02 = time.time()
+#         print("time for predicting on patches: ", t02-t01)
+        
+#         s = patches.slices()
+#         for idx in range(len(patches.points)):
+#                 Y[s[idx,0], s[idx,1], s[idx,2]] = x[idx,...]
+#         tot_time = time.time() - t0
+#         print("Total time for segmentation at stride %i: %.2f seconds"%(upsample, tot_time))
+#         return Y
     
     
 #     def sparse_segment(self, X, max_stride = 4):
@@ -462,9 +575,110 @@ class SparseSegmenter():
 #         return Y
     
     
+#     def _get_xy(self, X, Y, sampling_method, max_stride, batch_size, add_noise, random_rotate):
+        
+        
+#         if sampling_method in ["grid", "random-fixed-width"]:
+#             patches = Patches(X.shape, initialize_by = sampling_method, \
+#                               patch_size = self.model_size, \
+#                               stride = max_stride, \
+#                               n_points = batch_size)    
+
+#         elif sampling_method in ["random"]:
+#             patches = Patches(X.shape, initialize_by = sampling_method, \
+#                               min_patch_size = self.model_size, \
+#                               max_stride = max_stride, \
+#                               n_points = batch_size)    
+
+#         y = patches.extract(Y, self.model_size)[...,np.newaxis]
+#         x = patches.extract(X, self.model_size)[...,np.newaxis]
+#         std_batch = np.random.uniform(0, add_noise, batch_size)
+#         x = y + np.asarray([np.random.normal(0, std_batch[ii], y.shape[1:]) for ii in range(batch_size)])
+
+#         if random_rotate:
+#             nrots = np.random.randint(0, 4, batch_size)
+#             for ii in range(batch_size):
+#                 axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
+#                 x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
+#                 y[ii, ..., 0] = np.rot90(y[ii, ..., 0], k=nrots[ii], axes=axes)
+# #         print("DEBUG: shape x %s, shape y %s"%(str(x.shape), str(y.shape)))
+        
+#         return x, y
+    
+
     
     
     
+########## NOT PART OF SparseSegmenter class ####################
+def _rescale_data(data, min_val, max_val):
+    '''
+    Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
+
+    '''
+    xp = cp.get_array_module(data)  # 'xp' is a standard usage in the community
+    eps = 1e-12
+    data = (data - min_val) / (max_val - min_val + eps)
+    return data
+
+
+def _find_min_max(vol, sampling_factor):
+
+    ss = slice(None, None, sampling_factor)
+    xp = cp.get_array_module(vol[ss,ss,ss])  # 'xp' is a standard usage in the community
+    max_val = xp.max(vol[ss,ss,ss])
+    min_val = xp.min(vol[ss,ss,ss])
+    return min_val, max_val
+
+def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1):
+    '''
+    Normalizes volume to values into range [0,1]  
+
+    '''
+
+    tot_len = vol.shape[0]
+    nchunks = int(np.ceil(tot_len/chunk_size))
+    max_val, min_val = _find_min_max(vol, normalize_sampling_factor)
+    
+    proc_times = []
+    copy_to_times = []
+    copy_from_times = []
+    stream1 = cp.cuda.Stream()
+    t0 = time.time()
+    
+    vol_gpu = cp.zeros((chunk_size, vol.shape[1], vol.shape[2]), dtype = cp.float32)
+    for jj in range(nchunks):
+        t01 = time.time()
+        sz = slice(jj*chunk_size, min((jj+1)*chunk_size, tot_len))
+        
+        
+        ## copy to gpu from cpu
+        with stream1:    
+            vol_gpu.set(vol[sz,...])
+        stream1.synchronize()    
+        t02 = time.time()
+        copy_to_times.append(t02-t01)
+        
+        ## process
+        with stream1:
+             vol_gpu = _rescale_data(vol_gpu, min_val, max_val)
+        stream1.synchronize()
+        t03 = time.time()
+        proc_times.append(t03-t02)
+        
+        ## copy from gpu to cpu
+        with stream1:
+            vol[sz,...] = vol_gpu.get()            
+        stream1.synchronize()    
+        t04 = time.time()
+        copy_from_times.append(t04 - t03)
+    
+    print("copy to gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_to_times)*1000.0))
+    print("processing time per %i size chunk: %.2f ms"%(chunk_size,np.mean(proc_times)*1000.0))
+    print("copy from gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_from_times)*1000.0))
+    print("total time: ", time.time() - t0)
+    return vol
+
+
 if __name__ == "__main__":
     
     print('just a bunch of functions')
