@@ -224,7 +224,7 @@ class Patches():
         
         return np.asarray(points), np.asarray(widths), False
                           
-    def _set_grid(self, patch_size = None, stride = None):
+    def _set_grid(self, patch_size = None, stride = None, n_points = None):
 
         '''
         Initialize (n,3) points on the corner of volume patches placed on a grid. Some overlap is introduced to prevent edge effects while stitching.  
@@ -268,6 +268,17 @@ class Patches():
                     points.append([ii*stepsize[0], jj*stepsize[1]])
         
         widths = [list(patch_size)]*len(points)
+        
+        
+        if n_points is not None:
+            points = np.asarray(points)
+            widths = np.asarray(widths)
+            # sample randomly
+            rng = default_rng()
+            idxs = rng.choice(points.shape[0], n_points, replace = False)
+            points = points[idxs,...].copy()
+            widths = widths[idxs,...].copy()
+        
         return np.asarray(points), np.asarray(widths), False
             
 #         mz, my, mx = self.vol_shape
@@ -287,7 +298,7 @@ class Patches():
 #         widths = [list(patch_size)]*len(points)
 #         return np.asarray(points), np.asarray(widths), False
 
-    def _set_regular_grid(self, patch_size = None, stride = None):
+    def _set_regular_grid(self, patch_size = None, stride = None, n_points = None):
 
         '''
         Initialize (n,3) points on the corner of volume patches placed on a grid. No overlap is used. Instead, the volume is cropped such that it is divisible by the patch_size in that dimension.  
@@ -324,6 +335,16 @@ class Patches():
                     points.append([ii*stepsize[0], jj*stepsize[1]])
         
         widths = [list(patch_size)]*len(points)
+        
+        if n_points is not None:
+            points = np.asarray(points)
+            widths = np.asarray(widths)
+            # sample randomly
+            rng = default_rng()
+            idxs = rng.choice(points.shape[0], n_points, replace = False)
+            points = points[idxs,...].copy()
+            widths = widths[idxs,...].copy()
+        
         return np.asarray(points), np.asarray(widths), False
     
     
@@ -644,8 +665,7 @@ class Patches():
         xp = cp.get_array_module(vol)
         
         _ndim = len(self.vol_shape)
-        if vol.shape != self.vol_shape:
-            raise ValueError("Shape of big volume does not match vol_shape attribute of patches data")
+        assert vol.shape == self.vol_shape, "Shape of big volume does not match vol_shape attribute of patches data"
 
         # calculate binning
         bin_vals = self._calc_binning(patch_size)

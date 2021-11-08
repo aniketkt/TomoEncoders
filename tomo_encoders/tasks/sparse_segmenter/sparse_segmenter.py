@@ -40,7 +40,6 @@ import time
 #     def do_something_else(self):
 #         pass
 
-
 class SparseSegmenter():
     def __init__(self,\
                  model_initialization = "define-new", \
@@ -117,7 +116,8 @@ class SparseSegmenter():
             self.models[model_key].save(os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag)))
         return
     
-    def _build_models(self, model_size = (64,64,64), descriptor_tag = "misc", **model_params):
+    def _build_models(self, model_size = (64,64,64), \
+                      descriptor_tag = "misc", **model_params):
         '''
         
         Parameters
@@ -197,13 +197,14 @@ class SparseSegmenter():
         print("Shape X %s, shape Y %s"%(str(X.shape), str(Y.shape)))
         return X, Y
     
-    def load_datasets(self, datasets, normalize_sampling_factor = 4):
+    def load_datasets(self, datasets, normalize_sampling_factor = 4, TIMEIT = False):
     
         '''
         Parameters  
         ----------  
         
         '''
+        t0 = time.time()
         n_vols = len(datasets)
         
         Xs = [0]*n_vols
@@ -220,8 +221,16 @@ class SparseSegmenter():
             Xs[ii], Ys[ii] = self._read_data_pairs(ds_X, ds_Y, dataset['s_crops'], normalize_sampling_factor)
             ii += 1
         del ii
+        if TIMEIT:
+            t_exec = float(time.time() - t0)
+            self._msg_exec_time(self.load_datasets, t_exec)
+        
         return Xs, Ys
     
+    def _msg_exec_time(self, func, t_exec):
+        print("TIME: %s: %.2f seconds"%(func.__name__, t_exec))
+        return
+        
     def train(self, Xs, Ys, batch_size, \
               sampling_method, n_epochs,\
               random_rotate = False, \
@@ -256,31 +265,44 @@ class SparseSegmenter():
         
         return
 
+    def _find_blanks(self, patches, cutoff, Y_gt):
+        
+        assert Y_gt.shape == patches.vol_shape, "volume of Y_gt does not match vol_shape"
+        y_tmp = patches.extract(Y_gt, self.model_size)[...,np.newaxis]
+        ystd = np.std(y_tmp, axis = (1,2,3))
+
+        cond_list = ystd > np.max(ystd)*cutoff
+        return cond_list.astype(bool)
     
-    def _get_xy_noblanks(self, X, Y, sampling_method, max_stride, batch_size, add_noise, random_rotate, cutoff):
-        
-        
+    def get_patches(self, vol_shape,\
+                    sampling_method, \
+                    max_stride, \
+                    batch_size, \
+                    cutoff = 0.0, Y_gt = None):
         ip = 0
         tot_len = 0
         patches = None
         while tot_len < batch_size:
             
-            if sampling_method in ["grid", "random-fixed-width"]:
-                p_tmp = Patches(X.shape, initialize_by = sampling_method, \
+            if sampling_method in ["grid", "random-fixed-width", 'regular-grid']:
+                p_tmp = Patches(vol_shape, initialize_by = sampling_method, \
                                   patch_size = self.model_size, \
                                   stride = max_stride, \
                                   n_points = batch_size)    
 
             elif sampling_method in ["random"]:
-                p_tmp = Patches(X.shape, initialize_by = sampling_method, \
+                p_tmp = Patches(vol_shape, initialize_by = sampling_method, \
                                   min_patch_size = self.model_size, \
                                   max_stride = max_stride, \
                                   n_points = batch_size)    
             
-            y_tmp = p_tmp.extract(Y, self.model_size)[...,np.newaxis]
-            ystd = np.std(y_tmp, axis = (1,2,3))
+            # blank removal - avoid if not requested.
+            # to-do: how fast is blank removal?
+            if cutoff > 0.0:
+                cond_list = self._find_blanks(p_tmp, cutoff, Y_gt)
+            else:
+                cond_list = np.asarray([True]*len(p_tmp)).astype(bool)
             
-            cond_list = ystd > np.max(ystd)*cutoff
             if np.sum(cond_list) > 0:
                 # do stuff
                 p_tmp = p_tmp.filter_by_condition(cond_list)
@@ -292,7 +314,16 @@ class SparseSegmenter():
                     tot_len = len(patches)
             
         patches = patches.select_random_sample(batch_size)
+
+        return patches
+    
         
+    def extract_training_patch_pairs(self, X, Y, patches, add_noise, random_rotate):
+        '''
+        Extract training pairs x and y from a given volume X, Y pair
+        '''
+        
+        batch_size = len(patches)
         y = patches.extract(Y, self.model_size)[...,np.newaxis]            
         x = patches.extract(X, self.model_size)[...,np.newaxis]
         std_batch = np.random.uniform(0, add_noise, batch_size)
@@ -308,7 +339,18 @@ class SparseSegmenter():
         
         return x, y
     
-    def data_generator(self, Xs, Ys, batch_size, sampling_method, max_stride = 1, random_rotate = False, add_noise = 0.1, cutoff = 0.0):
+    def random_data_generator(self, batch_size):
+
+        while True:
+
+            x_shape = tuple([batch_size] + list(self.model_size) + [1])
+            print(data_shape)
+            x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
+            y = np.random.randint(0, 2, x_shape)#.astype(np.uint8)
+            x[x == 0] = 1.0e-12
+            yield x, y
+    
+    def data_generator(self, Xs, Ys, batch_size, sampling_method, max_stride = 1, random_rotate = False, add_noise = 0.1, cutoff = 0.0, return_patches = False, TIMEIT = False):
 
         
         '''
@@ -333,22 +375,27 @@ class SparseSegmenter():
             # use _get_xy
             idx_vols = np.random.randint(0, n_vols, batch_size)
             
+            
+
             xy = []
             for ivol in range(n_vols):
-                xy.append(self._get_xy_noblanks(Xs[ivol], \
-                                                Ys[ivol], \
-                                                sampling_method, \
-                                                max_stride, \
-                                                np.sum(idx_vols == ivol), \
-                                                add_noise, \
-                                                random_rotate, \
-                                                cutoff))
-            
-            yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), \
-            np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
+                patches = self.get_patches(X.shape, \
+                                           sampling_method, \
+                                           max_stride, \
+                                           np.sum(idx_vols == ivol),\
+                                           cutoff, Y_gt = Y)
+                xy.append(self.extract_training_patch_pairs(Xs[ivol], \
+                                                            Ys[ivol], \
+                                                            patches, \
+                                                            add_noise, \
+                                                            random_rotate))
                 
-    
-    def _predict_patches(self, x, chunk_size, out_arr, min_max = None):
+            
+            yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
+                
+    def _predict_patches(self, x, chunk_size, out_arr, \
+                         min_max = None, \
+                         TIMEIT = False):
 
         t0 = time.time()
         nb = len(x)
@@ -367,31 +414,31 @@ class SparseSegmenter():
             sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
             x_in = x[sb,...]
 
+            if min_max is not None:
+                min_val, max_val = min_max
+                x_in = _rescale_data(x_in, float(min_val), float(max_val))
+            
             if padding != 0:
                 if k == nchunks - 1:
-                    x_in = np.pad(x_in, ((0,padding), (0,0), (0,0), (0,0), (0,0)), mode = 'constant')
-
-                if min_max is not None:
-                    min_val, max_val = min_max
-                    x_in = _rescale_data(x_in, float(min_val), float(max_val))
-
+                    x_in = np.pad(x_in, \
+                                  ((0,padding), (0,0), \
+                                   (0,0), (0,0), (0,0)), mode = 'edge')
                 x_out = self.models['segmenter'].predict(x_in)
 
                 if k == nchunks -1:
                     x_out = x_out[:-padding,...]
             else:
-
-                if min_max is not None:
-                    min_val, max_val = min_max
-                    x_in = _rescale_data(x_in, float(min_val), float(max_val))
-
                 x_out = self.models['segmenter'].predict(x_in)
             out_arr[sb,...] = x_out
 
         t_unit = (time.time() - t0)*1000.0/nb
         print("inf. time p. input patch = %.2f ms, nb = %i"%(t_unit, nb))        
         print("\n")
-        return out_arr
+        
+        if TIMEIT:
+            return out_arr, t_unit
+        else:
+            return out_arr
     
     def segment_volume(self, X, Y, patches, batch_size = 32, normalize_sampling_factor = 2):
         
@@ -438,7 +485,30 @@ class SparseSegmenter():
         msk[:,:,1:][tmp] = 1
         return msk > 0
     
+    def calc_voxel_min_max(self, vol, sampling_factor, TIMEIT = False):
+
+        '''
+        returns min and max values for a big volume sampled at some factor
+        '''
+        t0 = time.time()
+        ss = slice(None, None, sampling_factor)
+        xp = cp.get_array_module(vol[ss,ss,ss])  # 'xp' is a standard usage in the community
+        max_val = xp.max(vol[ss,ss,ss])
+        min_val = xp.min(vol[ss,ss,ss])
+        tot_time = time.time() - t0
+        if TIMEIT:
+            self._msg_exec_time(self.calc_voxel_min_max, tot_time)            
+        return min_val, max_val
     
+    def rescale_data(self, data, min_val, max_val):
+        '''
+        Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
+
+        '''
+        xp = cp.get_array_module(data)  # 'xp' is a standard usage in the community
+        eps = 1e-12
+        data = (data - min_val) / (max_val - min_val + eps)
+        return data
     
 ######### TO-DO: upsampling part #################    
     
@@ -485,13 +555,6 @@ class SparseSegmenter():
 #         tot_time = time.time() - t0
 #         print("Total time for segmentation: %.2f seconds"%(tot_time))
 #         return Y
-    
-    
-    
-    
-    
-    
-    
     
     
 #     def _segment_patches_upsampling(self, X, Y, patches, upsample = 1, arr_split_infer = 1):
@@ -575,39 +638,6 @@ class SparseSegmenter():
 #         return Y
     
     
-#     def _get_xy(self, X, Y, sampling_method, max_stride, batch_size, add_noise, random_rotate):
-        
-        
-#         if sampling_method in ["grid", "random-fixed-width"]:
-#             patches = Patches(X.shape, initialize_by = sampling_method, \
-#                               patch_size = self.model_size, \
-#                               stride = max_stride, \
-#                               n_points = batch_size)    
-
-#         elif sampling_method in ["random"]:
-#             patches = Patches(X.shape, initialize_by = sampling_method, \
-#                               min_patch_size = self.model_size, \
-#                               max_stride = max_stride, \
-#                               n_points = batch_size)    
-
-#         y = patches.extract(Y, self.model_size)[...,np.newaxis]
-#         x = patches.extract(X, self.model_size)[...,np.newaxis]
-#         std_batch = np.random.uniform(0, add_noise, batch_size)
-#         x = y + np.asarray([np.random.normal(0, std_batch[ii], y.shape[1:]) for ii in range(batch_size)])
-
-#         if random_rotate:
-#             nrots = np.random.randint(0, 4, batch_size)
-#             for ii in range(batch_size):
-#                 axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
-#                 x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
-#                 y[ii, ..., 0] = np.rot90(y[ii, ..., 0], k=nrots[ii], axes=axes)
-# #         print("DEBUG: shape x %s, shape y %s"%(str(x.shape), str(y.shape)))
-        
-#         return x, y
-    
-
-    
-    
     
 ########## NOT PART OF SparseSegmenter class ####################
 def _rescale_data(data, min_val, max_val):
@@ -629,7 +659,7 @@ def _find_min_max(vol, sampling_factor):
     min_val = xp.min(vol[ss,ss,ss])
     return min_val, max_val
 
-def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1):
+def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TIMEIT = False):
     '''
     Normalizes volume to values into range [0,1]  
 
@@ -672,11 +702,14 @@ def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1):
         t04 = time.time()
         copy_from_times.append(t04 - t03)
     
-    print("copy to gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_to_times)*1000.0))
-    print("processing time per %i size chunk: %.2f ms"%(chunk_size,np.mean(proc_times)*1000.0))
-    print("copy from gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_from_times)*1000.0))
-    print("total time: ", time.time() - t0)
-    return vol
+#     print("copy to gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_to_times)*1000.0))
+#     print("processing time per %i size chunk: %.2f ms"%(chunk_size,np.mean(proc_times)*1000.0))
+#     print("copy from gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_from_times)*1000.0))
+#     print("total time: ", time.time() - t0)
+    if TIMEIT:
+        return vol, float(time.time() - t0)
+    else:
+        return vol
 
 
 if __name__ == "__main__":
