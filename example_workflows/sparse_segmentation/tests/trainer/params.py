@@ -59,10 +59,10 @@ def get_model_params(model_tag):
 
 training_params = {"sampling_method" : "random", \
                    "batch_size" : 24, \
-                   "n_epochs" : 30,\
+                   "n_epochs" : 10,\
                    "random_rotate" : True, \
                    "add_noise" : 0.05, \
-                   "max_stride" : 4, \
+                   "max_stride" : 8, \
                    "cutoff" : 0.2, \
                    "normalize_sampling_factor": 4}
 

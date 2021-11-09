@@ -83,7 +83,7 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
     del ii
     if TIMEIT:
         t_exec = float(time.time() - t0)
-        self._msg_exec_time(load_dataset_pairs, t_exec)
+        _msg_exec_time(load_dataset_pairs, t_exec)
     return Xs, Ys
 
 
@@ -127,7 +127,7 @@ class SparseSegmenter():
         config = ConfigProto()
         config.gpu_options.allow_growth = True
         session = InteractiveSession(config=config)
-        
+        self.tf_session = session
         ######### RUNTIME GPU USAGE ###########
         gpus = tf.config.experimental.list_physical_devices('GPU')
         if gpus:
@@ -357,7 +357,6 @@ class SparseSegmenter():
         while True:
 
             x_shape = tuple([batch_size] + list(self.model_size) + [1])
-            print(data_shape)
             x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
             y = np.random.randint(0, 2, x_shape)#.astype(np.uint8)
             x[x == 0] = 1.0e-12
@@ -497,21 +496,17 @@ class SparseSegmenter():
         msk[:,:,:-1][tmp] = 1
         msk[:,:,1:][tmp] = 1
         return msk > 0
+
     
+
     def calc_voxel_min_max(self, vol, sampling_factor, TIMEIT = False):
 
         '''
         returns min and max values for a big volume sampled at some factor
         '''
-        t0 = time.time()
-        ss = slice(None, None, sampling_factor)
-        xp = cp.get_array_module(vol[ss,ss,ss])  # 'xp' is a standard usage in the community
-        max_val = xp.max(vol[ss,ss,ss])
-        min_val = xp.min(vol[ss,ss,ss])
-        tot_time = time.time() - t0
-        if TIMEIT:
-            self._msg_exec_time(self.calc_voxel_min_max, tot_time)            
-        return min_val, max_val
+
+        return _find_min_max(vol, sampling_factor, TIMEIT = TIMEIT)
+    
     
     def rescale_data(self, data, min_val, max_val):
         '''
@@ -653,6 +648,15 @@ class SparseSegmenter():
     
     
 ########## NOT PART OF SparseSegmenter class ####################
+
+def _msg_exec_time(func, t_exec):
+    if type(func) is str:
+        print("TIME: %s: %.2f seconds"%(func, t_exec))
+    else:
+        print("TIME: %s: %.2f seconds"%(func.__name__, t_exec))
+    return
+
+
 def _rescale_data(data, min_val, max_val):
     '''
     Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
@@ -663,13 +667,19 @@ def _rescale_data(data, min_val, max_val):
     data = (data - min_val) / (max_val - min_val + eps)
     return data
 
+def _find_min_max(vol, sampling_factor, TIMEIT = False):
 
-def _find_min_max(vol, sampling_factor):
-
+    '''
+    returns min and max values for a big volume sampled at some factor
+    '''
+    t0 = time.time()
     ss = slice(None, None, sampling_factor)
     xp = cp.get_array_module(vol[ss,ss,ss])  # 'xp' is a standard usage in the community
     max_val = xp.max(vol[ss,ss,ss])
     min_val = xp.min(vol[ss,ss,ss])
+    tot_time = time.time() - t0
+    if TIMEIT:
+        _msg_exec_time("find voxel min max", tot_time)            
     return min_val, max_val
 
 def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TIMEIT = False):

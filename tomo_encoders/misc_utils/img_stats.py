@@ -42,7 +42,7 @@ def calc_SNR(img, seg_img, labels = (0,1), mask_ratio = None):
         SNR of img w.r.t seg_img  
 
     """
-    
+    eps = 1.0e-12
     # handle circular mask  
     if mask_ratio is not None:
         crop_val = int(img.shape[-1]*0.5*(1 - mask_ratio/np.sqrt(2)))
@@ -57,17 +57,20 @@ def calc_SNR(img, seg_img, labels = (0,1), mask_ratio = None):
             img = img[vcrop_slice, crop_slice, crop_slice]
             seg_img = seg_img[vcrop_slice, crop_slice, crop_slice]
             
-        
     pix_1 = img[seg_img == labels[1]]
     pix_0 = img[seg_img == labels[0]]
-    mu1 = np.mean(pix_1)
-    mu0 = np.mean(pix_0)
-    s = abs(1/(mu1 - mu0))
-    std1 = np.std(pix_1)
-    std0 = np.std(pix_0)
-    std = np.sqrt(0.5*(std1**2 + std0**2))
-    std = s*std
-    return 1/std
+    
+    if np.any(pix_1) and np.any(pix_0):
+        mu1 = np.mean(pix_1)
+        mu0 = np.mean(pix_0)
+        s = abs(1/(mu1 - mu0 + eps))
+        std1 = np.std(pix_1)
+        std0 = np.std(pix_0)
+        std = np.sqrt(0.5*(std1**2 + std0**2))
+        std = s*std
+        return 1/(std + eps)
+    else:
+        return 1/(np.std(img) + eps)
 
 def calc_jac_acc(true_img, seg_img):
     """

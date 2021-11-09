@@ -471,6 +471,19 @@ class Patches():
             out_list.append(self.features[:,self.feature_names.index(name)])
         return np.asarray(out_list).T
     
+    
+    def filter_by_cylindrical_mask(self, mask_ratio = 0.9, height_ratio = 1.0):
+        '''
+        Selects patches whose centers lie inside a cylindrical volume of radius = mask_ratio*nx/2. This assumes that the volume shape is a tomogram where ny = nx. The patches are filtered along the vertical (or z) axis if height_ratio < 1.0.  
+        '''
+        
+        max_radius = int(mask_ratio*self.vol_shape[-1]/2.0)
+        max_z_from_center = int(height_ratio*self.vol_shape[0]/2.0)
+        
+        p_centers = self.centers()
+        return
+    
+    
     def filter_by_condition(self, cond_list):
         '''  
         Select coordinates based on condition list. Here we use numpy.compress. The input cond_list can be from a number of classifiers.  

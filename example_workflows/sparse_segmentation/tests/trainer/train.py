@@ -31,7 +31,7 @@ def fit(fe, Xs, Ys):
     fe.save_models(model_path)
     t1_train = time.time()
     tot_training_time = (t1_train - t0_train)/60.0
-    
+    fe.tf_session.close()
     print("\nTRAINING TIME: %.2f minutes"%tot_training_time)
     
     return fe
@@ -42,14 +42,17 @@ def infer(fe, Xs, Ys):
 if __name__ == "__main__":
 
     
-    model_tags = ["M_a01", "M_a02", "M_a03", "M_a04"]
+#    model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
 
+    model_tags = ["M_a01", "M_a03"]
     datasets = get_datasets(dataset_names[:1], test_binning = test_binning)
-    print(datasets.keys()[0])
+    print(datasets.keys())
     Xs, Ys = load_dataset_pairs(datasets)
     
     
     for model_tag in model_tags:
+        
+        print("#"*55, "\nWorking on model %s\n"%model_tag, "#"*55)
         model_params = get_model_params(model_tag)
         fe = SparseSegmenter(model_initialization = 'define-new', \
                                  model_size = model_size, \

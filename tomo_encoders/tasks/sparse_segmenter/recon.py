@@ -134,7 +134,7 @@ def fbp_filter(data, TIMEIT = False):
     
     return data
 
-def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = True, TIMEIT = False):
+def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, apply_fbp = True, TIMEIT = False):
     
     '''
     reconstruct with binning projections and theta
@@ -149,8 +149,11 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
         center value for the projection data  
     theta_binning : int
         binning of theta
-    yx_binning : int
-        binning of projections
+    z_binning : int
+        vertical binning of projections
+    col_binning : int  
+        horizontal binning of projections  
+    
     Returns
     -------
     
@@ -165,9 +168,9 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
     
     stream_copy = cp.cuda.Stream()
     with stream_copy:
-        data = cp.array(projs[::theta_binning, ::yx_binning, ::yx_binning].copy())
+        data = cp.array(projs[::theta_binning, ::z_binning, ::col_binning].copy())
         theta = cp.array(theta[::theta_binning], dtype = 'float32')
-        center = cp.float32(center/yx_binning)
+        center = cp.float32(center/col_binning)
         vol_shape = (data.shape[1], data.shape[2], data.shape[2])
     
         # make sure the width of projection is divisible by four after padding
@@ -181,7 +184,6 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
     
     if apply_fbp:
         data = fbp_filter(data) # need to apply filter to full projection  
-        print(data.shape)
         
     # st* - start, p* - number of points
     stz, sty, stx = (0,0,0)
@@ -200,7 +202,7 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
     if TIMEIT:
-        print("TIME coarse reconstruction: %.2f ms"%t_gpu)
+        print("TIME binned reconstruction: %.2f ms"%t_gpu)
     
     return obj.get()
 

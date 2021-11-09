@@ -35,7 +35,6 @@ nb = [1000]*1
 min_max = (-1,1)
 print("\nnb list: ", nb)
 
-print("###### EXPERIMENT WITH CHUNK_SIZE = %i"%chunk_size)
 if min_max is None:
     print("\tnormalization is turned off")
 
@@ -44,7 +43,7 @@ def fit(fe):
     batch_size = training_params["batch_size"]
     n_epochs = training_params["n_epochs"]
     
-    dg = fe.random_data_generator(model_size, batch_size)
+    dg = fe.random_data_generator(batch_size)
     
     t0 = time.time()
     tot_steps = 1000
@@ -66,7 +65,8 @@ def infer(fe):
 #     https://github.com/tensorflow/tensorflow/issues/46950
     nb_init = chunk_size
     num_inits = 3
-    
+
+    print("EXPERIMENT WITH CHUNK_SIZE = %i"%chunk_size)
     for jj in range(num_inits):
         x = np.random.uniform(0, 1, tuple([nb_init] + list(model_size) + [1])).astype(np.float32)
         y_pred, t_unit = fe._predict_patches(x, chunk_size, None, \
@@ -83,8 +83,8 @@ def infer(fe):
         unit_times.append(t_unit)
     
     ax.scatter(nb, unit_times, marker = 'o', color = 'black')
-    ax.set_xlabel('batch size')
-    ax.set_ylabel('inference time per unit patch (ms)')
+    ax.set_xlabel('BATCH SIZE')
+    ax.set_ylabel('INFERENCE TIME PER UNIT PATCH (ms)')
 #     ax.set_ylim([0,80])
 #     ax.set_xticks(nb)
     plt.savefig(os.path.join(save_path, "batch_sizes.png"))
@@ -92,7 +92,7 @@ def infer(fe):
 
     df = pd.DataFrame(columns = ["nb", "t_unit"], data = np.asarray([nb, unit_times]).T)
     df.to_csv(csv_path, index = False)
-    print("mean inference time per unit patch: %.2f ms"%np.mean(unit_times))
+    print("MEAN INFERENCE TIME PER UNIT PATCH: %.2f ms"%np.mean(unit_times))
     
 if __name__ == "__main__":
 
