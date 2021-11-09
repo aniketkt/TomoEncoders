@@ -40,6 +40,53 @@ import time
 #     def do_something_else(self):
 #         pass
 
+
+def read_data_pair(ds_X, ds_Y, s_crops, normalize_sampling_factor):
+
+    print("loading data...")
+    X = ds_X.read_full().astype(np.float32)
+    Y = ds_Y.read_full().astype(np.uint8)
+
+    X = X[s_crops].copy()
+    Y = Y[s_crops].copy()
+
+    # normalize volume, check if shape is compatible.  
+    X = normalize_volume_gpu(X, normalize_sampling_factor = normalize_sampling_factor, chunk_size = 1).astype(np.float16)
+
+    print("done")
+    print("Shape X %s, shape Y %s"%(str(X.shape), str(Y.shape)))
+    return X, Y
+
+def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
+
+    
+    '''
+    load datasets using DataFile objects for X and Y. Multiple dataset pairs can be loaded.  
+    '''
+    
+    t0 = time.time()
+    n_vols = len(datasets)
+
+    Xs = [0]*n_vols
+    Ys = [0]*n_vols
+    ii = 0
+    for filename, dataset in datasets.items():
+
+        ds_X = DataFile(dataset['fpath_X'], tiff = False, \
+                        data_tag = dataset['data_tag_X'], VERBOSITY = 0)
+
+        ds_Y = DataFile(dataset['fpath_Y'], tiff = False, \
+                        data_tag = dataset['data_tag_Y'], VERBOSITY = 0)
+
+        Xs[ii], Ys[ii] = read_data_pair(ds_X, ds_Y, dataset['s_crops'], normalize_sampling_factor)
+        ii += 1
+    del ii
+    if TIMEIT:
+        t_exec = float(time.time() - t0)
+        self._msg_exec_time(load_dataset_pairs, t_exec)
+    return Xs, Ys
+
+
 class SparseSegmenter():
     def __init__(self,\
                  model_initialization = "define-new", \
@@ -181,22 +228,6 @@ class SparseSegmenter():
         self.model_tag = "_".join(model_names["segmenter"].split("_")[1:])
         return
 
-    def _read_data_pairs(self, ds_X, ds_Y, s_crops, normalize_sampling_factor):
-        
-        print("loading data...")
-        X = ds_X.read_full().astype(np.float32)
-        Y = ds_Y.read_full().astype(np.uint8)
-        
-        X = X[s_crops].copy()
-        Y = Y[s_crops].copy()
-        
-        # normalize volume, check if shape is compatible.  
-        X = normalize_volume_gpu(X, normalize_sampling_factor = normalize_sampling_factor, chunk_size = 1).astype(np.float16)
-        
-        print("done")
-        print("Shape X %s, shape Y %s"%(str(X.shape), str(Y.shape)))
-        return X, Y
-    
     def load_datasets(self, datasets, normalize_sampling_factor = 4, TIMEIT = False):
     
         '''
@@ -204,27 +235,9 @@ class SparseSegmenter():
         ----------  
         
         '''
-        t0 = time.time()
-        n_vols = len(datasets)
-        
-        Xs = [0]*n_vols
-        Ys = [0]*n_vols
-        ii = 0
-        for filename, dataset in datasets.items():
-            
-            ds_X = DataFile(dataset['fpath_X'], tiff = False, \
-                            data_tag = dataset['data_tag_X'], VERBOSITY = 0)
-            
-            ds_Y = DataFile(dataset['fpath_Y'], tiff = False, \
-                            data_tag = dataset['data_tag_Y'], VERBOSITY = 0)
-            
-            Xs[ii], Ys[ii] = self._read_data_pairs(ds_X, ds_Y, dataset['s_crops'], normalize_sampling_factor)
-            ii += 1
-        del ii
-        if TIMEIT:
-            t_exec = float(time.time() - t0)
-            self._msg_exec_time(self.load_datasets, t_exec)
-        
+        Xs, Ys = load_dataset_pairs(datasets, \
+                               normalize_sampling_factor = normalize_sampling_factor, \
+                               TIMEIT = TIMEIT)
         return Xs, Ys
     
     def _msg_exec_time(self, func, t_exec):
@@ -379,11 +392,11 @@ class SparseSegmenter():
 
             xy = []
             for ivol in range(n_vols):
-                patches = self.get_patches(X.shape, \
+                patches = self.get_patches(Xs[ivol].shape, \
                                            sampling_method, \
                                            max_stride, \
                                            np.sum(idx_vols == ivol),\
-                                           cutoff, Y_gt = Y)
+                                           cutoff, Y_gt = Ys[ivol])
                 xy.append(self.extract_training_patch_pairs(Xs[ivol], \
                                                             Ys[ivol], \
                                                             patches, \

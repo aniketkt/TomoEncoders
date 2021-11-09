@@ -21,8 +21,9 @@ save_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots'
 csv_path = os.path.join(save_path, "times.csv")
 from params import *
 
+
 #### THIS EXPERIMENT ####
-descriptor_tag = 'temp'
+model_tag = "M_a01"
 chunk_size = 32
 
 ######### DEFINE EXPERIMENT ON 'nb'
@@ -95,9 +96,10 @@ def infer(fe):
     
 if __name__ == "__main__":
 
+    model_params = get_model_params(model_tag)
     fe = SparseSegmenter(model_initialization = 'define-new', \
                          model_size = model_size, \
-                         descriptor_tag = descriptor_tag,\
+                         descriptor_tag = model_tag,\
                          gpu_mem_limit = gpu_mem_limit,\
                          **model_params)        
 #     fe.print_layers("segmenter")    

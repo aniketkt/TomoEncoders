@@ -5,6 +5,6 @@
 
 """
 
-from tomo_encoders.tasks.sparse_segmenter.sparse_segmenter import SparseSegmenter
+from tomo_encoders.tasks.sparse_segmenter.sparse_segmenter import SparseSegmenter, load_dataset_pairs
 
 

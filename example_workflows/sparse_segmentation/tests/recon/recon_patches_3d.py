@@ -15,7 +15,7 @@ import os
 
 read_fpath = '/data02/MyArchive/AM_part_Xuan/projs/mli_L206_HT_650_L3_projs_bin2_ntheta1500.hdf5'
 model_size = (64,64,64)
-from tomo_encoders.tasks.sparse_segmenter.recon_subvol import recon_patches_3d
+from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d
 
 if __name__ == "__main__":
 

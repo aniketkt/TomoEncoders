@@ -38,7 +38,7 @@ if __name__ == "__main__":
     p2d._check_valid_points()
     print("widths: ", p2d.widths[:1])    
 
-    iter_list = np.linspace(0, len(p2d), 20).astype(np.uint32)
+    iter_list = np.linspace(2, len(p2d), 20).astype(np.uint32)
     
     for ic, plen in enumerate(iter_list):
         t0 = time.time()

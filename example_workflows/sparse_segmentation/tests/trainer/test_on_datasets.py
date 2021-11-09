@@ -20,18 +20,20 @@ import matplotlib as mpl
 mpl.use('Agg')
 save_path = '/home/atekawade/Dropbox/Arg/transfers/model_history'
 
-descriptor_tag = 'tmp'#'test_noblanks_pt2cutoff_nostd'
 test_binning = 2
 from datasets import get_datasets, dataset_names
 from params import *
 n_samples = 1000
-model_names = {"segmenter" : "segmenter_Unet_%s"%descriptor_tag}
 
 
 def infer(fe, Xs, Ys):
     return
 
 if __name__ == "__main__":
+
+    model_tag = "M_a01"
+    model_params = get_model_params(model_tag)
+    model_names = {"segmenter" : "segmenter_Unet_%s"%model_tag}
 
     fe = SparseSegmenter(model_initialization = 'load-model', \
                          model_names = model_names, \
@@ -47,7 +49,7 @@ if __name__ == "__main__":
     
     
     # SAVE PATH
-    history_path = os.path.join(save_path, descriptor_tag)
+    history_path = os.path.join(save_path, model_tag)
     if not os.path.exists(history_path):
         os.makedirs(history_path)
     
