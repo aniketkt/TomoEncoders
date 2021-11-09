@@ -36,13 +36,17 @@ if __name__ == "__main__":
     p_grid = Patches(vol_shape, **kwargs)
     print("total patches: ", len(p_grid))
     p_grid._check_valid_points()
-#     p3d = p_grid.select_random_sample(500)
-    p3d = p_grid.copy()
-    print("widths: ", p3d.widths[:1])    
+    p3d = p_grid.select_random_sample(500)
+#     p3d = p_grid.copy()
+    print("widths: ", str(p3d.widths[:1]))    
 
     with cp.cuda.Device(0):
         center = projs.shape[-1]//2.0
-        sub_vols, p3d_new = recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 40.0, apply_fbp = True)
+        sub_vols, p3d_new = recon_patches_3d(projs, theta, center, p3d, \
+                                             mem_limit_gpu = 40.0, \
+                                             apply_fbp = True, \
+                                             TIMEIT = True)
+        cp.cuda.Device(0).synchronize()
     
     _old = np.lexsort(p3d.points[:,::-1].T)
     _new = np.lexsort(p3d_new.points[:,::-1].T)

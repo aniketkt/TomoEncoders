@@ -187,13 +187,13 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
     stz, sty, stx = (0,0,0)
     pz, py, px = vol_shape
     st = time.time()
-    obj = rec(data, theta, center+padding, \
+    obj = rec_patch(data, theta, center+padding, \
               stx+padding, px, \
               sty+padding, py, \
               0,           pz) # 0 since projections were cropped vertically
     
     device.synchronize()
-    print('total bytes', memory_pool.total_bytes())    
+#     print('total bytes: ', memory_pool.total_bytes())    
     
     end_gpu.record()
     end_gpu.synchronize()
@@ -204,7 +204,7 @@ def recon_binning(projs, theta, center, theta_binning, yx_binning, apply_fbp = T
     
     return obj.get()
 
-def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp = True):
+def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp = True, TIMEIT = False):
     '''
     
     Assumes the patches are on a regular (non-overlapping) grid.  
@@ -213,10 +213,6 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
-    
-    device = cp.cuda.Device()
-    memory_pool = cp.cuda.MemoryPool()
-    cp.cuda.set_allocator(memory_pool.malloc)
     
     vol_shape = p3d.vol_shape
     cond0 = projs.shape[1] != vol_shape[0]
@@ -232,7 +228,7 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
         z_width = p3d.widths[0,0]
     
     # assume no overlap between patches
-    # TO-DO: how to checksum this?
+    # to-do: how to checksum this?
     z_points = p3d.points[:,0]
     
     p2d_sorted = Patches(tuple(vol_shape[1:]), initialize_by = "data", \
@@ -243,9 +239,10 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
     z_points_unique = np.unique(z_points)    
 
     sub_vols = []
-    for icount, z_point in enumerate(z_points_unique):
+    from tqdm import tqdm
+    for icount, z_point in enumerate(tqdm(z_points_unique)):
         p2d_z = p2d_sorted.filter_by_condition(p2d_sorted.features[:,0] == z_point)
-        print("index %i, number of patches: %i"%(z_point, len(p2d_z)))  
+#         print("index %i, number of patches: %i"%(z_point, len(p2d_z)))  
         sub_vols.append(recon_chunk(projs[:,z_point:z_point+z_width,:], theta, center, p2d_z, apply_fbp = apply_fbp))
         
         widths_arr = np.concatenate([np.ones((len(p2d_z),1))*z_width, p2d_z.widths], axis = 1)
@@ -260,23 +257,18 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
             p3d_new.append(p3d_tmp)
         del p3d_tmp
 
-        
     sub_vols = np.concatenate(sub_vols, axis = 0)    
-    
-    device.synchronize()
-    print('total bytes', memory_pool.total_bytes())    
     
     end_gpu.record()
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
     if TIMEIT:
-        print("TIME reconstruct 3D patches: %.2f ms"%t_gpu)
+        print("TIME reconstruct 3D patches: %.2f seconds"%(t_gpu/1000.0))
         
     return sub_vols, p3d_new
     
-    
-def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
+def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
     
     '''
     reconstruct a region within full volume defined by 2d patches with corner points (y, x) and widths (wy, wx) and a height  
@@ -294,12 +286,16 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
     mem_limit_gpu : float  
         mem limit in GB for GPU  
     
-
-    
     Returns
     -------
     
     '''
+    
+    device = cp.cuda.Device()
+    memory_pool = cp.cuda.MemoryPool()
+    cp.cuda.set_allocator(memory_pool.malloc)
+    
+    
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
@@ -308,22 +304,19 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
     t0_copy = time.time()
     with stream_copy:
         data = cp.array(projs)
+        # make sure the width of projection is divisible by four after padding
+        proj_w = data.shape[-1]
+        tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
+        tot_width = int(np.ceil(tot_width/8)*8) 
+        padding = int((tot_width - proj_w)//2)
+        data = cp.pad(data, ((0,0),(0,0),(padding, padding)), mode = 'edge')
+        center = cp.float32(center)    
+        theta = cp.array(theta, dtype = 'float32')
         stream_copy.synchronize()
-    
-    # make sure the width of projection is divisible by four after padding
-    proj_w = data.shape[-1]
-    tot_width = int(proj_w*(1 + 0.25*2)) # 1/4 padding
-    tot_width = int(np.ceil(tot_width/8)*8) 
-    padding = int((tot_width - proj_w)//2)
-    data = cp.pad(data, ((0,0),(0,0),(padding, padding)), mode = 'edge')
-    
-    theta = cp.array(theta, dtype = 'float32')
     if apply_fbp:
         data = fbp_filter(data) # need to apply filter to full projection  
-        print(data.shape)
+#         print(data.shape)
 
-    center = cp.float32(center)    
-    
     # st* - start, p* - number of points
     stz = 0
     pz = data.shape[1] # this is 64 as it is a chunk (not full projs)
@@ -332,14 +325,24 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
         sty, stx = p2d.points[ip]
         py, px = p2d.widths[ip]
         
-        tmp_rec = rec(data, theta, center+padding, \
+        tmp_rec = rec_patch(data, theta, center+padding, \
                   stx+padding, px, sty+padding, py, stz, pz)
         sub_vols.append(tmp_rec.get())
-        cp.cuda.stream.get_current_stream().synchronize()
+    sub_vols = np.asarray(sub_vols)
+
+    device.synchronize()
+#     print('total bytes: ', memory_pool.total_bytes())    
     
-    print("\n")
+    end_gpu.record()
+    end_gpu.synchronize()
+    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
-    return np.asarray(sub_vols)
+    if TIMEIT:
+        print("TIME reconstruct z-chunk: %.2f seconds"%(t_gpu/1000.0))
+
+        
+#     print("\n")
+    return sub_vols
 
 ######### TRASH - RECON PATCH ##########
 # def test_recon_patch(projs, theta, center, point, width, apply_fbp = True):
@@ -391,7 +394,7 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True):
 #         stz, sty, stx = point
 #         pz, py, px = width
 #         st = time.time()
-#         obj = rec(data, theta, center+padding, \
+#         obj = rec_patch(data, theta, center+padding, \
 #                   stx+padding, px, \
 #                   sty+padding, py, \
 #                   0,           pz) # 0 since projections were cropped vertically
