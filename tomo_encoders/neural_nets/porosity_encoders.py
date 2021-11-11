@@ -594,6 +594,8 @@ def build_Unet_3D(vol_shape, n_filters = [16,32,64], \
             if list, list length must be equal to number of blocks.  
             
     """
+    assert vol_shape is None, "vol_shape parameter to build_Unet_3D is not valid since this is a fully conv. neural net."
+        
     vol_shape = (None,None,None,1)
     inp = L.Input(vol_shape)
     

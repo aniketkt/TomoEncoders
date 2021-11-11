@@ -1,0 +1,19 @@
+Dropbox is already running!
+(tf2GPU) atekawade@ikshana:/data02/MyArchive/aisteer_3Dencoders/TomoEncoders/example_workflows/sparse_segmentationn/tests/trainer$ python train.py 
+dict_keys(['mli_L206_HT_650_L3', 'AM316_L205_fs_tomo_L5'])
+loading data...
+done
+Shape X (902, 4200, 4200), shape Y (902, 4200, 4200)
+loading data...
+done
+Shape X (800, 5200, 5200), shape Y (800, 5200, 5200)
+####################################################### 
+Working on model M_a01_256
+ #######################################################
+Traceback (most recent call last):
+  File "train.py", line 59, in <module>
+    model_params = get_model_params(model_tag)
+  File "/data02/MyArchive/aisteer_3Dencoders/TomoEncoders/example_workflows/sparse_segmentation/tests/trainer/params256.py", line 51, in get_model_params
+    raise ValueError("model_tag not found")
+ValueError: model_tag not found
+(tf2GPU) atekawade@ikshana:/data02/MyArchive/aisteer_3Dencoders/TomoEncoders/example_workflows/sparse_segmentationn/tests/trainer$ 

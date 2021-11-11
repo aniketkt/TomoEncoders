@@ -14,16 +14,14 @@ from tomo_encoders.tasks import SparseSegmenter, load_dataset_pairs
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes
 
 # descriptor_tag = 'tmp'#'test_noblanks_pt2cutoff_nostd'
-test_binning = 1
 from datasets import get_datasets, dataset_names
 
 # INPUT SIZE CHANGE
-from params256 import *
-TRAINING_INPUT_SIZE = (256,256,256)
-
+from params import *
 # model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
-model_tags = ["M_a01_256", "M_a02_256"]
-
+model_tags = ["M_a02", "M_a01"]
+test_binning = 2
+TRAINING_INPUT_SIZE = (32,32,32)
 
 def fit(fe, Xs, Ys):
     
@@ -52,15 +50,16 @@ if __name__ == "__main__":
     print(datasets.keys())
     Xs, Ys = load_dataset_pairs(datasets)
     
-    
+    training_params = get_training_params(TRAINING_INPUT_SIZE)
     for model_tag in model_tags:
         
         print("#"*55, "\nWorking on model %s\n"%model_tag, "#"*55)
         model_params = get_model_params(model_tag)
         fe = SparseSegmenter(model_initialization = 'define-new', \
-                                 input_size = TRAINING_INPUT_SIZE, \
+                                 input_size = training_params["training_input_size"], \
                                  descriptor_tag = model_tag, \
                                  **model_params)
+        
         fit(fe, Xs, Ys)
     
     

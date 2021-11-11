@@ -24,7 +24,7 @@ import matplotlib as mpl
 mpl.use('Agg')
 save_path = '/home/atekawade/Dropbox/Arg/transfers/model_history'
 
-test_binning = 2
+test_binning = 1
 cutoff = 0.2
 from datasets import get_datasets, dataset_names
 from params import *
@@ -94,10 +94,10 @@ if __name__ == "__main__":
             # plot some images and save
             fig, ax = plt.subplots(2,3, figsize = (8,6))
             view_midplanes(vol = fe.rescale_data(x[ii], *min_max), ax = ax[0])
-            view_midplanes(vol = fe._edge_map(y_pred[ii]), \
+            view_midplanes(vol = y_pred[ii].astype(np.uint8), \
                            cmap = 'copper', alpha = 0.3, ax = ax[0])
             view_midplanes(vol = fe.rescale_data(x[ii], *min_max), ax = ax[1])
-            view_midplanes(vol = fe._edge_map(y[ii]),      \
+            view_midplanes(vol = y[ii].astype(np.uint8),      \
                            cmap = 'copper', alpha = 0.3, ax = ax[1])
             plt.savefig(os.path.join(history_path, "patch_midplane_idx%04d.png"%ii))
             plt.close()

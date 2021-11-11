@@ -29,6 +29,9 @@ import h5py
 import abc
 import time
 
+MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if count is exceeded.
+
+
 
 # complete once you write one or two feature extractors
 # class AnyFeatureExtractor(metaclass = abc.ABCMeta):
@@ -45,11 +48,14 @@ DEFAULT_INPUT_SIZE = (64,64,64)
 def read_data_pair(ds_X, ds_Y, s_crops, normalize_sampling_factor):
 
     print("loading data...")
-    X = ds_X.read_full().astype(np.float32)
-    Y = ds_Y.read_full().astype(np.uint8)
 
-    X = X[s_crops].copy()
-    Y = Y[s_crops].copy()
+    X = ds_X.read_data(slice_3D = s_crops).astype(np.float32)
+    Y = ds_Y.read_data(slice_3D = s_crops).astype(np.uint8)
+    
+#     X = ds_X.read_full().astype(np.float32)
+#     Y = ds_Y.read_full().astype(np.uint8)
+#     X = X[s_crops].copy()
+#     Y = Y[s_crops].copy()
 
     # normalize volume, check if shape is compatible.  
     X = normalize_volume_gpu(X, normalize_sampling_factor = normalize_sampling_factor, chunk_size = 1).astype(np.float16)
@@ -64,7 +70,7 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
     '''
     load datasets using DataFile objects for X and Y. Multiple dataset pairs can be loaded.  
     '''
-    
+    TIMEIT = True
     t0 = time.time()
     n_vols = len(datasets)
 
@@ -85,14 +91,31 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
     if TIMEIT:
         t_exec = float(time.time() - t0)
         _msg_exec_time(load_dataset_pairs, t_exec)
+    
+    
+    print("DATASET SHAPES: \n")
+    for ip in range(len(Xs)):
+        print("dataset %ip: %s\n"(ip+1, str(Xs[ip].shape)))
+                                
     return Xs, Ys
 
 
 class SparseSegmenter():
     def __init__(self,\
                  model_initialization = "define-new", \
-                 input_size = DEFAULT_INPUT_SIZE, \
+                 input_size = None, \
                  descriptor_tag = "misc", gpu_mem_limit = 48.0, **model_params):
+        
+        ### INPUT_SIZE assignment can be different for training and testing
+        assert input_size is not None, "need input_size to instantiate SparseSegmenter"
+        if model_initialization == "define-new":
+            _txt = "TRAINING"
+        elif model_initialization == "load-model":
+            _txt = "INFERENCE"
+        print("SparseSegmenter instance for %s with INPUT_SIZE = %s"%(_txt, \
+                                                                      str(input_size)))
+        self.input_size = input_size
+        
         '''
         
         Parameters
@@ -145,15 +168,13 @@ class SparseSegmenter():
                          "load-weights" : self._load_weights}
 
         
-        # any function chosen must assign self.models, self.model_tag and self.input_size
+        # any function chosen must assign self.models, self.model_tag
         
         if model_initialization == "define-new":
-            model_getters[model_initialization](input_size = input_size, \
-                                                descriptor_tag = descriptor_tag, \
+            model_getters[model_initialization](descriptor_tag = descriptor_tag, \
                                                 **model_params)
         elif model_initialization == "load-model":
-            model_getters[model_initialization](input_size = input_size, \
-                                                **model_params)
+            model_getters[model_initialization](**model_params)
         else:
             raise NotImplementedError("method is not implemented")
             
@@ -162,12 +183,12 @@ class SparseSegmenter():
     def save_models(self, model_path):
         
         for model_key in self.models.keys():
-            self.models[model_key].save(os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag)))
+            inp_txt = "-".join([str(_t) for _t in list(self.input_size)])
+            self.models[model_key].save(os.path.join(model_path, "%s_%s_%s.hdf5"%(model_key, self.model_tag, inp_txt)))
         return
     
     
     def test_speeds(self, chunk_size, n_reps = 3, input_size = None):
-    
     
         if input_size is None:
             input_size = self.input_size
@@ -176,8 +197,7 @@ class SparseSegmenter():
             y_pred = self.predict_patches(x, chunk_size, None, min_max = (-1,1), TIMEIT = True)
         return
     
-    def _build_models(self, input_size = DEFAULT_INPUT_SIZE, \
-                      descriptor_tag = "misc", **model_params):
+    def _build_models(self, descriptor_tag = "misc", **model_params):
         '''
         
         Parameters
@@ -194,10 +214,6 @@ class SparseSegmenter():
             self.models = {}
 
         # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
-        if input_size is None:
-            self.input_size = DEFAULT_INPUT_SIZE
-        else:
-            self.input_size = input_size
             
         self.model_tag = "Unet_%s"%(descriptor_tag)
 
@@ -205,7 +221,7 @@ class SparseSegmenter():
         for key in model_keys:
             self.models.update({key : None})
         # input_size here is redundant if the network is fully convolutional
-        self.models["segmenter"] = build_Unet_3D(self.input_size + (1,), **model_params) 
+        self.models["segmenter"] = build_Unet_3D(None, **model_params) 
         self.models["segmenter"].compile(optimizer=tf.keras.optimizers.Adam(),\
                       loss=tf.keras.losses.BinaryCrossentropy())
         return
@@ -224,7 +240,7 @@ class SparseSegmenter():
         print('\n'.join(txt_out))
         return
         
-    def _load_models(self, model_names = None, model_path = 'some/path', input_size = None):
+    def _load_models(self, model_names = None, model_path = 'some/path'):
         
         '''
         Parameters
@@ -241,11 +257,6 @@ class SparseSegmenter():
         for model_key, model_name in model_names.items():
             self.models.update({model_key : load_model(os.path.join(model_path, model_name + '.hdf5'), \
                                                       custom_objects = custom_objects_dict)})
-        # insert assignment of input_size here
-        if input_size is None:
-            self.input_size = DEFAULT_INPUT_SIZE #self.models["segmenter"].input_shape[1:-1]
-        else:
-            self.input_size = input_size
             
         self.model_tag = "_".join(model_names["segmenter"].split("_")[1:])
         return
@@ -319,6 +330,10 @@ class SparseSegmenter():
         patches = None
         while tot_len < batch_size:
             
+            # count iterations
+            assert ip <= MAX_ITERS, "stuck in loop while finding patches to train on"
+            ip+= 1
+            
             if sampling_method in ["grid", 'regular-grid', "random-fixed-width"]:
                 p_tmp = Patches(vol_shape, initialize_by = sampling_method, \
                                   patch_size = self.input_size, \
@@ -348,9 +363,10 @@ class SparseSegmenter():
                 else:
                     patches.append(p_tmp)
                     tot_len = len(patches)
-            
+            else:
+                continue
+        
         patches = patches.select_random_sample(batch_size)
-
         return patches
     
         

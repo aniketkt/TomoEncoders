@@ -121,7 +121,7 @@ if __name__ == "__main__":
                          descriptor_tag = model_tag,\
                          gpu_mem_limit = gpu_mem_limit,\
                          **model_params) 
-    print("EXPERIMENT WITH PATCH_SIZE = ", patch_size)
+    print("EXPERIMENT WITH INPUT_SIZE = ", patch_size)
 #     fe.print_layers("segmenter")    
 #     fe.models["segmenter"].summary()
 
