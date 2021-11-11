@@ -4,7 +4,7 @@
 """ 
 
 # to-do: get these inputs from command line or config file
-model_size = (64,64,64)
+model_size = (128,128,128)
 model_path = '/data02/MyArchive/aisteer_3Dencoders/models/AM_part_segmenter'
 gpu_mem_limit = 48.0
 
@@ -17,7 +17,7 @@ def get_model_params(model_tag):
     m = {"n_filters" : [16, 32, 64], \
          "n_blocks" : 3, \
          "activation" : 'lrelu', \
-         "batch_norm" : True, \
+         "batch_norm" : False, \
          "isconcat" : [True, True, True], \
          "pool_size" : [2,2,2], \
          "stdinput" : False}

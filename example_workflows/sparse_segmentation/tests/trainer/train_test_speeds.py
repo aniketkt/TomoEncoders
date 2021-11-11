@@ -69,7 +69,7 @@ def infer(fe):
     print("EXPERIMENT WITH CHUNK_SIZE = %i"%chunk_size)
     for jj in range(num_inits):
         x = np.random.uniform(0, 1, tuple([nb_init] + list(model_size) + [1])).astype(np.float32)
-        y_pred, t_unit = fe._predict_patches(x, chunk_size, None, \
+        y_pred, t_unit = fe.predict_patches(x, chunk_size, None, \
                                                 min_max = min_max, \
                                                 TIMEIT = True)
     unit_times = []
@@ -77,7 +77,7 @@ def infer(fe):
     
     for jj in range(len(nb)):
         x = np.random.uniform(0, 1, tuple([nb[jj]] + list(model_size) + [1])).astype(np.float32)
-        y_pred, t_unit = fe._predict_patches(x, chunk_size, None, \
+        y_pred, t_unit = fe.predict_patches(x, chunk_size, None, \
                                                 min_max = min_max, \
                                                 TIMEIT = True)
         unit_times.append(t_unit)
@@ -102,7 +102,10 @@ if __name__ == "__main__":
                          descriptor_tag = model_tag,\
                          gpu_mem_limit = gpu_mem_limit,\
                          **model_params)        
-#     fe.print_layers("segmenter")    
+    fe.print_layers("segmenter")    
+    fe.models["segmenter"].summary()
+    fe.save_models(model_path)
+    
     if len(sys.argv) > 1:
         if sys.argv[1] == "infer":
             infer(fe)

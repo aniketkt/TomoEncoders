@@ -405,10 +405,13 @@ class SparseSegmenter():
             
             yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
                 
-    def _predict_patches(self, x, chunk_size, out_arr, \
+    
+    def predict_patches(self, x, chunk_size, out_arr, \
                          min_max = None, \
                          TIMEIT = False):
 
+        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
+        
         t0 = time.time()
         nb = len(x)
         nchunks = int(np.ceil(nb/chunk_size))
@@ -419,7 +422,7 @@ class SparseSegmenter():
             out_arr = np.empty_like(x) # use numpy since return from predict is numpy
         else:
             # to-do: check dims
-            pass
+            assert out_arr.shape == x.shape, "x and out_arr shapes must be equal and 4-dimensional (batch_size, nz, ny, nx, 1)"
 
         for k in range(nchunks):
 
@@ -739,3 +742,51 @@ if __name__ == "__main__":
     
     print('just a bunch of functions')
     
+#     import os, multiprocessing
+
+
+#     m = fe.models["segmenter"]
+    
+    
+    
+#     def multiprocess_predict_patches(args):
+
+#         '''
+#         '''
+#         m, x = args
+#         n_gpu = 4
+        
+        
+#         idx = int(multiprocessing.current_process().name.split('-')[-1]) % n_gpu
+#         with tf.device('/gpu:%d' % idx):
+            
+#             return predict_patches(m, x, chunk_size, out_arr, \
+#                          min_max = None, \
+#                          TIMEIT = False)
+
+    
+    
+#     p = multiprocessing.Pool(n_gpu)
+    
+#     batches = [(m, x) for x in np.array_split(x, n_gpu)]
+    
+#     predicts = p.map(run_instance, batches) 
+    
+#     predicts = np.concatenate(predicts, axis = 0)
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        

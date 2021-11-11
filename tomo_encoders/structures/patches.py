@@ -17,6 +17,7 @@ import cupy as cp
 
 from multiprocessing import Pool, cpu_count
 import functools
+import time
 
 from numpy.random import default_rng
 import abc
@@ -40,6 +41,7 @@ class Patches():
         self.vol_shape = vol_shape
         
         initializers = {"data" : self._check_data, \
+                        "slices" : self._from_slices,\
                         "grid" : self._set_grid, \
                         "regular-grid" : self._set_regular_grid, \
                         "multiple-grids" : self._set_multiple_grids, \
@@ -177,6 +179,23 @@ class Patches():
             
         points = np.asarray(points)
         widths = np.asarray(widths)
+            
+        return points, widths, check_valid
+
+    
+    def _from_slices(self, s = None, check_valid = None):
+        
+        plen = len(s)
+        _ndim = len(s[0])
+        
+        points = np.empty((plen, 3))
+        widths = np.empty((plen, 3))
+        for ii in range(plen):
+            points[ii,...] = np.asarray([s[ii][ia].start for ia in range(_ndim)])
+            widths[ii,...] = np.asarray([s[ii][ia].stop - s[ii][ia].start for ia in range(_ndim)])
+            
+        points = np.asarray(points).astype(int)
+        widths = np.asarray(widths).astype(int)
             
         return points, widths, check_valid
     
@@ -680,18 +699,65 @@ class Patches():
         _ndim = len(self.vol_shape)
         assert vol.shape == self.vol_shape, "Shape of big volume does not match vol_shape attribute of patches data"
 
-        # calculate binning
-        bin_vals = self._calc_binning(patch_size)
-        # make a list of slices
-        s = self.slices(binning = bin_vals)
+        
+        if patch_size is not None:
+            # calculate binning
+            bin_vals = self._calc_binning(patch_size)
+            # make a list of slices
+            s = self.slices(binning = bin_vals)
+        else:
+            s = self.slices()
+        
         # make a list of patches
         if _ndim == 3:
             sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
         elif _ndim == 2:
             sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1]]) for ii in range(len(self.points))]
         
-        return xp.asarray(sub_vols, dtype = vol.dtype)
+        if patch_size is None:
+            return sub_vols
+        else:
+            return xp.asarray(sub_vols, dtype = vol.dtype)
     
+    
+    def fill_patches_in_volume(self, sub_vols, vol_out, TIMEIT = False):
+        
+        '''
+        to-do: Test cases: a volume full of ones may be assigned a list of sub_vols of zeroes 
+        then extract patches back from the vol, and assert equal to sub_vols from before
+        '''
+        
+        t0 = time.time()
+        
+        # to-do: check if these assertions slow things down?
+        assert len(self) == len(sub_vols), "number of sub-volumes do not match the number of items in patches"
+        
+        assert self.vol_shape == vol_out.shape, "shape of volume enclosing the patches does not match that of the output volume"
+        for ii in range(len(self)):
+            assert tuple(self.widths[ii,...]) == tuple(sub_vols[ii].shape), "width mismatch between sub_vol and patch at ii = %i"%ii
+            assert sub_vols[ii].ndim == 3, "sub_vols must be a 4-D array or a list of volumes of some shape. (batch_size, nz, ny, nx)"        
+        s = self.slices()
+        for idx in range(len(self)):
+                vol_out[tuple(s[idx,...])] = sub_vols[idx]
+        t1 = time.time()
+        t_tot = (t1-t0)*1000.0/len(self)
+        if TIMEIT:
+            print("TIME PER UNIT PATCH fill_patches_in_volume: %.2f ms"%t_tot)
+        return
+        
+        # should I return the volume?    
+        
+    def upsample_patches(self, sub_vols, upsampling_fac):
+        raise NotImplementedError("not ")
+        assert sub_vols.ndim == 4, "sub_vols array must have shape (batch_size, width_z, width_y, width_x) and ndim == 4 (no channel axis)"
+
+        # can we use some cupy function here? to-do.
+        sub_vols = UpSampling3D(upsampling_fac)(sub_vols)
+        return sub_vols, self.rescale(upsampling_fac, new_vol_shape = new_vol_shape)
+
+        
+        
+    ######## CONSIDERING REMOVING THE CODE BELOW ###############
     def stitch(self, sub_vols, patch_size, upsample = False):
         '''  
         Stitches the big volume from a list of volume patches (with upsampling).    
@@ -739,10 +805,11 @@ class Patches():
 
 #     def _slice_shift(self, s, shift):
 #         return slice(s.start + shift, s.stop + shift, s.step)
-    
+
+
     def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
-        if self.vol_shape != 3:
+        if len(self.vol_shape) != 3:
             raise NotImplementedError("implemented only for 3D patches")
         
         if plot_type == 'centers':
@@ -756,8 +823,8 @@ class Patches():
         if self.feature_names is not None:
             ax.set_title(self.feature_names[ife], fontsize = 16)
         return    
-    
-    
+        
+        
 if __name__ == "__main__":
     
     print('just a bunch of functions')
