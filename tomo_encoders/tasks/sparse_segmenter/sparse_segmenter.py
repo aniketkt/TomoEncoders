@@ -40,6 +40,7 @@ import time
 #     def do_something_else(self):
 #         pass
 
+DEFAULT_INPUT_SIZE = (64,64,64)
 
 def read_data_pair(ds_X, ds_Y, s_crops, normalize_sampling_factor):
 
@@ -90,7 +91,7 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
 class SparseSegmenter():
     def __init__(self,\
                  model_initialization = "define-new", \
-                 model_size = (64,64,64), \
+                 input_size = DEFAULT_INPUT_SIZE, \
                  descriptor_tag = "misc", gpu_mem_limit = 48.0, **model_params):
         '''
         
@@ -99,7 +100,7 @@ class SparseSegmenter():
         model_initialization : str
             either "define-new" or "load-model"
         
-        model_size : tuple
+        input_size : tuple
             shape of the input patch required by model
 
         descriptor_tag : str
@@ -109,7 +110,7 @@ class SparseSegmenter():
             If "define-new", this contains the hyperparameters that define the architecture of the neural network model. If "load-model", it contains the paths to the models.
             
         models : dict of tf.keras.Models.model 
-            dict contains {"latent_embedder" : encoder_model, "CAE" : denoiser_model}. Here, both models are keras 3D models with input shape = model_size
+            dict contains {"latent_embedder" : encoder_model, "CAE" : denoiser_model}. Here, both models are keras 3D models with input shape = input_size
 
         '''
         ######### START GPU SETTINGS ############
@@ -144,14 +145,15 @@ class SparseSegmenter():
                          "load-weights" : self._load_weights}
 
         
-        # any function chosen must assign self.models, self.model_tag and self.model_size
+        # any function chosen must assign self.models, self.model_tag and self.input_size
         
         if model_initialization == "define-new":
-            model_getters[model_initialization](model_size = model_size, \
+            model_getters[model_initialization](input_size = input_size, \
                                                 descriptor_tag = descriptor_tag, \
                                                 **model_params)
         elif model_initialization == "load-model":
-            model_getters[model_initialization](**model_params)
+            model_getters[model_initialization](input_size = input_size, \
+                                                **model_params)
         else:
             raise NotImplementedError("method is not implemented")
             
@@ -163,7 +165,18 @@ class SparseSegmenter():
             self.models[model_key].save(os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag)))
         return
     
-    def _build_models(self, model_size = (64,64,64), \
+    
+    def test_speeds(self, chunk_size, n_reps = 3, input_size = None):
+    
+    
+        if input_size is None:
+            input_size = self.input_size
+        for jj in range(n_reps):
+            x = np.random.uniform(0, 1, tuple([chunk_size] + list(input_size) + [1])).astype(np.float32)
+            y_pred = self.predict_patches(x, chunk_size, None, min_max = (-1,1), TIMEIT = True)
+        return
+    
+    def _build_models(self, input_size = DEFAULT_INPUT_SIZE, \
                       descriptor_tag = "misc", **model_params):
         '''
         
@@ -181,13 +194,18 @@ class SparseSegmenter():
             self.models = {}
 
         # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
-        self.model_size = model_size
+        if input_size is None:
+            self.input_size = DEFAULT_INPUT_SIZE
+        else:
+            self.input_size = input_size
+            
         self.model_tag = "Unet_%s"%(descriptor_tag)
 
         model_keys = ["segmenter"]
         for key in model_keys:
             self.models.update({key : None})
-        self.models["segmenter"] = build_Unet_3D(self.model_size + (1,), **model_params)
+        # input_size here is redundant if the network is fully convolutional
+        self.models["segmenter"] = build_Unet_3D(self.input_size + (1,), **model_params) 
         self.models["segmenter"].compile(optimizer=tf.keras.optimizers.Adam(),\
                       loss=tf.keras.losses.BinaryCrossentropy())
         return
@@ -206,7 +224,7 @@ class SparseSegmenter():
         print('\n'.join(txt_out))
         return
         
-    def _load_models(self, model_names = None, model_path = 'some/path'):
+    def _load_models(self, model_names = None, model_path = 'some/path', input_size = None):
         
         '''
         Parameters
@@ -223,8 +241,12 @@ class SparseSegmenter():
         for model_key, model_name in model_names.items():
             self.models.update({model_key : load_model(os.path.join(model_path, model_name + '.hdf5'), \
                                                       custom_objects = custom_objects_dict)})
-        # insert assignment of model_size here
-        self.model_size = self.models["segmenter"].input_shape[1:-1]
+        # insert assignment of input_size here
+        if input_size is None:
+            self.input_size = DEFAULT_INPUT_SIZE #self.models["segmenter"].input_shape[1:-1]
+        else:
+            self.input_size = input_size
+            
         self.model_tag = "_".join(model_names["segmenter"].split("_")[1:])
         return
 
@@ -239,7 +261,7 @@ class SparseSegmenter():
                                normalize_sampling_factor = normalize_sampling_factor, \
                                TIMEIT = TIMEIT)
         return Xs, Ys
-    
+
     def _msg_exec_time(self, func, t_exec):
         print("TIME: %s: %.2f seconds"%(func.__name__, t_exec))
         return
@@ -281,7 +303,7 @@ class SparseSegmenter():
     def _find_blanks(self, patches, cutoff, Y_gt):
         
         assert Y_gt.shape == patches.vol_shape, "volume of Y_gt does not match vol_shape"
-        y_tmp = patches.extract(Y_gt, self.model_size)[...,np.newaxis]
+        y_tmp = patches.extract(Y_gt, self.input_size)[...,np.newaxis]
         ystd = np.std(y_tmp, axis = (1,2,3))
 
         cond_list = ystd > np.max(ystd)*cutoff
@@ -289,25 +311,26 @@ class SparseSegmenter():
     
     def get_patches(self, vol_shape,\
                     sampling_method, \
-                    max_stride, \
                     batch_size, \
+                    max_stride = None, \
                     cutoff = 0.0, Y_gt = None):
         ip = 0
         tot_len = 0
         patches = None
         while tot_len < batch_size:
             
-            if sampling_method in ["grid", "random-fixed-width", 'regular-grid']:
+            if sampling_method in ["grid", 'regular-grid', "random-fixed-width"]:
                 p_tmp = Patches(vol_shape, initialize_by = sampling_method, \
-                                  patch_size = self.model_size, \
-                                  stride = max_stride, \
+                                  patch_size = self.input_size, \
                                   n_points = batch_size)    
-
+                
             elif sampling_method in ["random"]:
                 p_tmp = Patches(vol_shape, initialize_by = sampling_method, \
-                                  min_patch_size = self.model_size, \
+                                  min_patch_size = self.input_size, \
                                   max_stride = max_stride, \
                                   n_points = batch_size)    
+            else:
+                raise ValueError("sampling method not supported")
             
             # blank removal - avoid if not requested.
             # to-do: how fast is blank removal?
@@ -337,8 +360,8 @@ class SparseSegmenter():
         '''
         
         batch_size = len(patches)
-        y = patches.extract(Y, self.model_size)[...,np.newaxis]            
-        x = patches.extract(X, self.model_size)[...,np.newaxis]
+        y = patches.extract(Y, self.input_size)[...,np.newaxis]            
+        x = patches.extract(X, self.input_size)[...,np.newaxis]
         std_batch = np.random.uniform(0, add_noise, batch_size)
         x = x + np.asarray([np.random.normal(0, std_batch[ii], x.shape[1:]) for ii in range(batch_size)])
 
@@ -356,7 +379,7 @@ class SparseSegmenter():
 
         while True:
 
-            x_shape = tuple([batch_size] + list(self.model_size) + [1])
+            x_shape = tuple([batch_size] + list(self.input_size) + [1])
             x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
             y = np.random.randint(0, 2, x_shape)#.astype(np.uint8)
             x[x == 0] = 1.0e-12
@@ -393,9 +416,10 @@ class SparseSegmenter():
             for ivol in range(n_vols):
                 patches = self.get_patches(Xs[ivol].shape, \
                                            sampling_method, \
-                                           max_stride, \
                                            np.sum(idx_vols == ivol),\
-                                           cutoff, Y_gt = Ys[ivol])
+                                           max_stride = max_stride, \
+                                           cutoff = cutoff,\
+                                           Y_gt = Ys[ivol])
                 xy.append(self.extract_training_patch_pairs(Xs[ivol], \
                                                             Ys[ivol], \
                                                             patches, \
@@ -410,9 +434,14 @@ class SparseSegmenter():
                          min_max = None, \
                          TIMEIT = False):
 
+        '''
+        Predicts sub_vols. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
+        
+        '''
         assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
         
         t0 = time.time()
+        print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
         nb = len(x)
         nchunks = int(np.ceil(nb/chunk_size))
         nb_padded = nchunks*chunk_size
@@ -447,10 +476,10 @@ class SparseSegmenter():
             out_arr[sb,...] = x_out
 
         t_unit = (time.time() - t0)*1000.0/nb
-        print("inf. time p. input patch = %.2f ms, nb = %i"%(t_unit, nb))        
-        print("\n")
         
         if TIMEIT:
+            print("inf. time p. input patch size %s = %.2f ms, nb = %i"%(str(x[0,...,0].shape), t_unit, nb))
+            print("\n")
             return out_arr, t_unit
         else:
             return out_arr
@@ -458,7 +487,7 @@ class SparseSegmenter():
     def segment_volume(self, X, Y, patches, batch_size = 32, normalize_sampling_factor = 2):
         
         t0 = time.time()
-        x = patches.extract(X, self.model_size)
+        x = patches.extract(X, self.input_size)
         x = x[...,np.newaxis]
         
         t01 = time.time()
@@ -542,7 +571,7 @@ class SparseSegmenter():
 #     def _segment_patches_mproc(self, X, Y, patches, arr_split_infer = 1, workers = 1):
         
 #         t0 = time.time()
-#         x = patches.extract(X, self.model_size)
+#         x = patches.extract(X, self.input_size)
 #         x = x[...,np.newaxis]
 #         t01 = time.time()
 #         print("time for extracting %i patches: "%len(x), t01-t0)
@@ -571,7 +600,7 @@ class SparseSegmenter():
 #     def _segment_patches_upsampling(self, X, Y, patches, upsample = 1, arr_split_infer = 1):
         
 #         t0 = time.time()
-#         x = patches.extract(X, self.model_size)
+#         x = patches.extract(X, self.input_size)
 #         x = x[...,np.newaxis]
 #         t01 = time.time()
 #         print("time for extracting %i patches: "%len(x), t01-t0)
@@ -603,14 +632,14 @@ class SparseSegmenter():
 #         X = self._normalize_volume(X)
 #         # first pass at max_stride
 #         patches = Patches(X.shape, initialize_by = "grid", \
-#                           patch_size = self.model_size, stride = max_stride)
+#                           patch_size = self.input_size, stride = max_stride)
         
         
 #         # convert to sobel map
 #         Y_edge = self._edge_map(Y_coarse)
         
 #         # extract patches to compute if it contains any edge voxels
-#         new_patch_size = tuple(np.asarray(self.model_size)//max_stride)
+#         new_patch_size = tuple(np.asarray(self.input_size)//max_stride)
 #         p_sel = Patches(new_vol_shape, initialize_by = "grid", patch_size = new_patch_size, stride = 1)
 #         sub_vols = p_sel.extract(Y_edge, new_patch_size)        
 #         p_sel.add_features(np.std(sub_vols, axis = (1,2,3)) > 0, names = ['has_edges'])

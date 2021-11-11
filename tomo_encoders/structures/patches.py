@@ -182,7 +182,6 @@ class Patches():
             
         return points, widths, check_valid
 
-    
     def _from_slices(self, s = None, check_valid = None):
         
         plen = len(s)
@@ -206,14 +205,14 @@ class Patches():
         This is calculated as the largest multiple of the original patch size that can fit along the respective axis.  
         '''
         
-        # TO-DO: Increasing stride size also increase overlap. At maximum stride, the overlap is nearly the width of the patch, which is weird. Handle this. Perhaps show a warning.  
+        # to-do: When using "grid", increasing stride size also increase overlap. At maximum stride, the overlap is nearly the width of the patch, which is weird. Handle this. Perhaps show a warning.  
         
         _ndims = len(self.vol_shape)
         if stride is None: return patch_size
         
         max_possible_stride = min([self.vol_shape[ii]//patch_size[ii] for ii in range(_ndims)])
         if stride > max_possible_stride:
-            raise ValueError("Cannot preserve aspect ratio with given value of zoom_out. Pick lower value.")
+            raise ValueError("Cannot preserve aspect ratio with given combination of patch_size and stride. Try lower values.")
 
         return tuple([patch_size[ii]*stride for ii in range(_ndims)])
         
@@ -235,6 +234,7 @@ class Patches():
         widths = np.concatenate(widths, axis = 0)
             
         if n_points is not None:
+            n_points = min(n_points, len(points))
             # sample randomly
             rng = default_rng()
             idxs = rng.choice(points.shape[0], n_points, replace = False)
@@ -243,10 +243,10 @@ class Patches():
         
         return np.asarray(points), np.asarray(widths), False
                           
-    def _set_grid(self, patch_size = None, stride = None, n_points = None):
+    def _set_grid(self, patch_size = None, stride = 1, n_points = None):
 
         '''
-        Initialize (n,3) points on the corner of volume patches placed on a grid. Some overlap is introduced to prevent edge effects while stitching.  
+        Initialize (n,3) points on the corner of volume patches placed on a grid. Some overlap is introduced to cover the full volume.  
         
         Parameters  
         ----------  
@@ -257,12 +257,8 @@ class Patches():
             Effectively multiplies the patch size by factor of stride.    
         
         '''
-        
         patch_size = self._check_stride(patch_size, stride)
-#         import pdb; pdb.set_trace()
-        
         # Find optimum number of patches to cover full image
-        
         # this was rewritten to accommodate both 2D and 3D patches.
         # old code commented out below
         m = list(self.vol_shape)
@@ -290,6 +286,7 @@ class Patches():
         
         
         if n_points is not None:
+            n_points = min(n_points, len(points))
             points = np.asarray(points)
             widths = np.asarray(widths)
             # sample randomly
@@ -300,24 +297,7 @@ class Patches():
         
         return np.asarray(points), np.asarray(widths), False
             
-#         mz, my, mx = self.vol_shape
-#         pz, py, px = patch_size
-#         nx, ny, nz = int(np.ceil(mx/px)), int(np.ceil(my/py)), int(np.ceil(mz/pz))
-#         stepx = (mx-px) // (nx-1) if mx != px else 0
-#         stepy = (my-py) // (ny-1) if my != py else 0
-#         stepz = (mz-pz) // (nz-1) if mz != pz else 0
-#         stepsize  = (stepz, stepy, stepx)
-#         nsteps = (nz, ny, nx)
-        
-#         points = []
-#         for ii in range(nsteps[0]):
-#             for jj in range(nsteps[1]):
-#                 for kk in range(nsteps[2]):
-#                     points.append([ii*stepsize[0], jj*stepsize[1], kk*stepsize[2]])
-#         widths = [list(patch_size)]*len(points)
-#         return np.asarray(points), np.asarray(widths), False
-
-    def _set_regular_grid(self, patch_size = None, stride = None, n_points = None):
+    def _set_regular_grid(self, patch_size = None, n_points = None):
 
         '''
         Initialize (n,3) points on the corner of volume patches placed on a grid. No overlap is used. Instead, the volume is cropped such that it is divisible by the patch_size in that dimension.  
@@ -326,13 +306,10 @@ class Patches():
         ----------  
         patch_size : tuple  
             A tuple of widths (or the smallest possible values thereof) of the patch volume  
-            
-        stride : int  
-            Effectively multiplies the patch size by factor of stride.    
         
         '''
         
-        patch_size = self._check_stride(patch_size, stride)
+        patch_size = self._check_stride(patch_size, 1)
 
         
         # Find optimum number of patches to cover full image
@@ -356,6 +333,7 @@ class Patches():
         widths = [list(patch_size)]*len(points)
         
         if n_points is not None:
+            n_points = min(n_points, len(points))
             points = np.asarray(points)
             widths = np.asarray(widths)
             # sample randomly
@@ -367,7 +345,7 @@ class Patches():
         return np.asarray(points), np.asarray(widths), False
     
     
-    def _get_random_fixed_width(self, patch_size = None, n_points = None, stride = None):
+    def _get_random_fixed_width(self, patch_size = None, n_points = None):
         """
         Generator that yields randomly sampled data pairs of number = batch_size.
 
@@ -376,15 +354,12 @@ class Patches():
         patch_size: tuple  
             size of the 3D patch as input volume  
             
-        stride : int  
-            (optional) width is defined as stride value multiplied by min_patch_size. Default is None (or = 1)    
-
         n_points: int
             size of the batch (number of patches to be extracted per batch)
 
         """
         _ndim = len(self.vol_shape)
-        patch_size = self._check_stride(patch_size, stride)
+        patch_size = self._check_stride(patch_size, 1)
         
         points = np.asarray([np.random.randint(0, self.vol_shape[ii] - patch_size[ii], n_points) \
                            for ii in range(_ndim)]).T
@@ -678,9 +653,7 @@ class Patches():
             raise ValueError("aspect ratios of some patches don't match!! Cannot bin to patch_size")
         if cond2: # avoid the need to upsample patches, can use a smaller model instead
             raise ValueError("patch_size cannot be larger than any given patch in the list")
-        if cond3: # constraint for ensuring stitch() works
-            raise ValueError("stitch only works when binning values are even numbers")
-
+        
         return bin_vals[:,0]
     
     def extract(self, vol, patch_size):
@@ -747,66 +720,7 @@ class Patches():
         
         # should I return the volume?    
         
-    def upsample_patches(self, sub_vols, upsampling_fac):
-        raise NotImplementedError("not ")
-        assert sub_vols.ndim == 4, "sub_vols array must have shape (batch_size, width_z, width_y, width_x) and ndim == 4 (no channel axis)"
-
-        # can we use some cupy function here? to-do.
-        sub_vols = UpSampling3D(upsampling_fac)(sub_vols)
-        return sub_vols, self.rescale(upsampling_fac, new_vol_shape = new_vol_shape)
-
-        
-        
-    ######## CONSIDERING REMOVING THE CODE BELOW ###############
-    def stitch(self, sub_vols, patch_size, upsample = False):
-        '''  
-        Stitches the big volume from a list of volume patches (with upsampling).    
-        
-        Returns
-        -------
-        np.ndarray  
-            shape is (n_pts, patch_z, patch_y, patch_x)  
-        
-        '''  
-        _ndim = len(self.vol_shape)
-        if sub_vols.shape[0] != len(self.points):
-            raise ValueError("number of patch points and length of input list of patches must match")
-        vol = np.zeros(self.vol_shape, dtype = sub_vols.dtype)
-        
-        # calculate binning
-        bin_vals = self._calc_binning(patch_size)
-        # make a list of slices
-        s = self.slices()
-        
-        if _ndim == 3:
-            # set gpu for upsampling
-            gpus = tf.config.experimental.list_physical_devices('GPU')
-            if gpus:
-                try:
-                    mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
-                    tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
-                except RuntimeError as e:
-                    print(e)        
-            
-            for ii in range(len(self.points)):
-                vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
-                vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
-                vol_out = vol_out[0,...,0]
-                vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
-
-        elif _ndim == 2:
-            for ii in range(len(self.points)):
-                vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
-                vol_out = cv2.resize(vol_out, (patch_size[1], patch_size[0]))
-                vol_out = vol_out[0,...,0]
-                vol[s[ii,0],s[ii,1]] = vol_out
-            
-        return vol
-
-#     def _slice_shift(self, s, shift):
-#         return slice(s.start + shift, s.stop + shift, s.step)
-
-
+    
     def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
         if len(self.vol_shape) != 3:
@@ -823,6 +737,63 @@ class Patches():
         if self.feature_names is not None:
             ax.set_title(self.feature_names[ife], fontsize = 16)
         return    
+    
+    def upsample_patches(self, sub_vols, upsampling_fac):
+        raise NotImplementedError("not ")
+        assert sub_vols.ndim == 4, "sub_vols array must have shape (batch_size, width_z, width_y, width_x) and ndim == 4 (no channel axis)"
+
+        # can we use some cupy function here? to-do.
+        sub_vols = UpSampling3D(upsampling_fac)(sub_vols)
+        return sub_vols, self.rescale(upsampling_fac, new_vol_shape = new_vol_shape)
+
+        
+        
+#     ######## CONSIDERING REMOVING THE CODE BELOW ###############
+#     def stitch(self, sub_vols, patch_size, upsample = False):
+#         '''  
+#         Stitches the big volume from a list of volume patches (with upsampling).    
+        
+#         Returns
+#         -------
+#         np.ndarray  
+#             shape is (n_pts, patch_z, patch_y, patch_x)  
+        
+#         '''  
+#         _ndim = len(self.vol_shape)
+#         if sub_vols.shape[0] != len(self.points):
+#             raise ValueError("number of patch points and length of input list of patches must match")
+#         vol = np.zeros(self.vol_shape, dtype = sub_vols.dtype)
+        
+#         # calculate binning
+#         bin_vals = self._calc_binning(patch_size)
+#         # make a list of slices
+#         s = self.slices()
+        
+#         if _ndim == 3:
+#             # set gpu for upsampling
+#             gpus = tf.config.experimental.list_physical_devices('GPU')
+#             if gpus:
+#                 try:
+#                     mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
+#                     tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
+#                 except RuntimeError as e:
+#                     print(e)        
+            
+#             for ii in range(len(self.points)):
+#                 vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
+#                 vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
+#                 vol_out = vol_out[0,...,0]
+#                 vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
+
+#         elif _ndim == 2:
+#             for ii in range(len(self.points)):
+#                 vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
+#                 vol_out = cv2.resize(vol_out, (patch_size[1], patch_size[0]))
+#                 vol_out = vol_out[0,...,0]
+#                 vol[s[ii,0],s[ii,1]] = vol_out
+            
+#         return vol
+
         
         
 if __name__ == "__main__":

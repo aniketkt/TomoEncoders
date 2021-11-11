@@ -23,15 +23,24 @@ from params import *
 
 
 #### THIS EXPERIMENT ####
-model_tag = "M_a01"
-chunk_size = 32
 
+patch_size = tuple([int(sys.argv[1])]*3)
+chunk_size = int(sys.argv[2])
+max_chunk_size = int(sys.argv[3]) if len(sys.argv) > 3 else 512
+model_tag = sys.argv[4] if len(sys.argv) > 4 else "M_a01"
 ######### DEFINE EXPERIMENT ON 'nb'
 # nb = chunk_size*2**np.random.randint(0, 4, 20)
+nb = []
+for ii in range(5):
+    nb_ = chunk_size*2**ii
+    if nb_ <= max_chunk_size:
+        nb.append(nb_)
+    else:
+        break
 # nb = chunk_size*2**np.arange(0, 5)
 # nb = np.random.randint(16, 512+1, 20)
 # nb = nb.tolist()
-nb = [1000]*1
+# nb = [1]*5 #+ [16]*5
 min_max = (-1,1)
 print("\nnb list: ", nb)
 
@@ -64,23 +73,28 @@ def infer(fe):
 #     Possible slowdown of first iteration due to tensorflow Dataset creation?
 #     https://github.com/tensorflow/tensorflow/issues/46950
     nb_init = chunk_size
-    num_inits = 3
+    num_inits = 2
 
-    print("EXPERIMENT WITH CHUNK_SIZE = %i"%chunk_size)
+    print("EXPERIMENT WITH CHUNK_SIZE = %i\n"%chunk_size)
     for jj in range(num_inits):
-        x = np.random.uniform(0, 1, tuple([nb_init] + list(model_size) + [1])).astype(np.float32)
-        y_pred, t_unit = fe.predict_patches(x, chunk_size, None, \
+        x = np.random.uniform(0, 1, tuple([nb_init] + list(patch_size) + [1])).astype(np.float32)
+        y_pred = fe.predict_patches(x, chunk_size, None, \
                                                 min_max = min_max, \
-                                                TIMEIT = True)
+                                                TIMEIT = False)
     unit_times = []
     fig, ax = plt.subplots(1,1,figsize = (8,6))
     
+    
+    print("#"*55,"\n")
     for jj in range(len(nb)):
-        x = np.random.uniform(0, 1, tuple([nb[jj]] + list(model_size) + [1])).astype(np.float32)
+        x = np.random.uniform(0, 1, tuple([nb[jj]] + list(patch_size) + [1])).astype(np.float32)
         y_pred, t_unit = fe.predict_patches(x, chunk_size, None, \
                                                 min_max = min_max, \
                                                 TIMEIT = True)
+        print("inf. time per voxel %.2f nanoseconds"%(t_unit/(np.prod(patch_size))*1.0e6))
+        print("\n","#"*55,"\n")
         unit_times.append(t_unit)
+#         print('next')
     
     ax.scatter(nb, unit_times, marker = 'o', color = 'black')
     ax.set_xlabel('BATCH SIZE')
@@ -92,28 +106,36 @@ def infer(fe):
 
     df = pd.DataFrame(columns = ["nb", "t_unit"], data = np.asarray([nb, unit_times]).T)
     df.to_csv(csv_path, index = False)
-    print("MEAN INFERENCE TIME PER UNIT PATCH: %.2f ms"%np.mean(unit_times))
+    t_unit_mean = np.mean(unit_times)
+    print("MEAN INFERENCE TIME PER UNIT PATCH: %.2f ms"%t_unit_mean)
+    t_vox = t_unit_mean/(np.prod(patch_size))*1.0e6
+    print("MEAN INFERENCE TIME PER VOXEL: %.2f nanoseconds"%t_vox)
+    
     
 if __name__ == "__main__":
 
+    print("EXPERIMENT WITH MODEL %s"%model_tag)
     model_params = get_model_params(model_tag)
     fe = SparseSegmenter(model_initialization = 'define-new', \
-                         model_size = model_size, \
+                         input_size = patch_size, \
                          descriptor_tag = model_tag,\
                          gpu_mem_limit = gpu_mem_limit,\
-                         **model_params)        
-    fe.print_layers("segmenter")    
-    fe.models["segmenter"].summary()
-    fe.save_models(model_path)
+                         **model_params) 
+    print("EXPERIMENT WITH PATCH_SIZE = ", patch_size)
+#     fe.print_layers("segmenter")    
+#     fe.models["segmenter"].summary()
+
+    infer(fe)
     
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "infer":
-            infer(fe)
-        elif sys.argv[1] == "fit":
-            fit(fe)
-    else:
-        fit(fe)
-        infer(fe)
+    
+#     if len(sys.argv) > 1:
+#         if sys.argv[1] == "infer":
+#             infer(fe)
+#         elif sys.argv[1] == "fit":
+#             fit(fe)
+#     else:
+#         fit(fe)
+#         infer(fe)
     
     
     

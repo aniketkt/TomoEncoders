@@ -24,21 +24,27 @@ import matplotlib as mpl
 mpl.use('Agg')
 save_path = '/home/atekawade/Dropbox/Arg/transfers/model_history'
 
-test_binning = 4
-stride = 1
+test_binning = 2
 cutoff = 0.2
 from datasets import get_datasets, dataset_names
 from params import *
-n_samples = 500
+n_samples = 3000
 cpu_procs = 1
+
+INFERENCE_INPUT_SIZE = (256,256,256)
+CHUNK_SIZE = 2
+# model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
+model_tags = ["M_a02"] #["M_a01", "M_a02"]
+
 
 def infer(fe, Xs, Ys):
     return
 
+
+
 if __name__ == "__main__":
 
     print("\n", "#"*55, "\nTest on dataset pairs")
-    model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
     datasets = get_datasets(dataset_names[1:], test_binning = test_binning)
     Xs, Ys = load_dataset_pairs(datasets, TIMEIT = True)
     for ii, key in enumerate(datasets):
@@ -54,14 +60,18 @@ if __name__ == "__main__":
         print("#"*55, "\nWorking on model %s\n"%model_tag, "#"*55)
         fe = SparseSegmenter(model_initialization = 'load-model', \
                              model_names = model_names, \
-                             model_path = model_path)    
+                             model_path = model_path, \
+                             input_size = INFERENCE_INPUT_SIZE)    
+        
+        fe.test_speeds(CHUNK_SIZE)
+        
         
         if im == 0:
-            patches = fe.get_patches(Xs[0].shape, "regular-grid", stride, n_samples, \
+            patches = fe.get_patches(Xs[0].shape, "random-fixed-width", n_samples, \
                                      cutoff = cutoff, Y_gt = Ys[0])
 
-            x = patches.extract(Xs[0], fe.model_size)
-            y = patches.extract(Ys[0], fe.model_size)
+            x = patches.extract(Xs[0], fe.input_size)
+            y = patches.extract(Ys[0], fe.input_size)
             min_max = fe.calc_voxel_min_max(Xs[0], 4, TIMEIT = True)
         
         
@@ -71,7 +81,7 @@ if __name__ == "__main__":
         if not os.path.exists(history_path):
             os.makedirs(history_path)
         
-        y_pred, tot_time = fe._predict_patches(x[...,np.newaxis], 32, None, \
+        y_pred, tot_time = fe.predict_patches(x[...,np.newaxis], CHUNK_SIZE, None, \
                                                min_max = min_max, \
                                                TIMEIT = True)
         y_pred = np.round(y_pred[...,0]).astype(np.uint8)
@@ -98,7 +108,7 @@ if __name__ == "__main__":
         IoU = Parallelize(list(zip(y, y_pred)), calc_jac_acc, procs = cpu_procs)
         SNR = Parallelize(list(zip(y, y_pred)), calc_SNR, procs = cpu_procs)
         ystd = np.std(y, axis = (1,2,3))
-        void_frac = np.sum(y, axis = (1,2,3))/np.prod(fe.model_size)
+        void_frac = np.sum(y, axis = (1,2,3))/np.prod(fe.input_size)
         print("time %.2f seconds"%(time.time() - t0))    
 
         df = pd.DataFrame(columns = ["SNR", "IoU", "ystd", "void_frac"], \
