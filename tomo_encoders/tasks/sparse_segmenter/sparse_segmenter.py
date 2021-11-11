@@ -49,13 +49,13 @@ def read_data_pair(ds_X, ds_Y, s_crops, normalize_sampling_factor):
 
     print("loading data...")
 
-    X = ds_X.read_data(slice_3D = s_crops).astype(np.float32)
-    Y = ds_Y.read_data(slice_3D = s_crops).astype(np.uint8)
+#     X = ds_X.read_data(slice_3D = s_crops).astype(np.float32)
+#     Y = ds_Y.read_data(slice_3D = s_crops).astype(np.uint8)
     
-#     X = ds_X.read_full().astype(np.float32)
-#     Y = ds_Y.read_full().astype(np.uint8)
-#     X = X[s_crops].copy()
-#     Y = Y[s_crops].copy()
+    X = ds_X.read_full().astype(np.float32)
+    Y = ds_Y.read_full().astype(np.uint8)
+    X = X[s_crops].copy()
+    Y = Y[s_crops].copy()
 
     # normalize volume, check if shape is compatible.  
     X = normalize_volume_gpu(X, normalize_sampling_factor = normalize_sampling_factor, chunk_size = 1).astype(np.float16)
@@ -95,7 +95,7 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
     
     print("DATASET SHAPES: \n")
     for ip in range(len(Xs)):
-        print("dataset %ip: %s\n"(ip+1, str(Xs[ip].shape)))
+        print("dataset %i: "%(ip+1), " -- ", Xs[ip].shape)
                                 
     return Xs, Ys
 
@@ -366,6 +366,10 @@ class SparseSegmenter():
             else:
                 continue
         
+        
+        assert patches is not None, "get_patches() failed to return any patches with selected conditions"
+#             print("DEBUG inside get_patches(). After all iterations, patches was found to be none.")
+#             import pdb; pdb.set_trace()
         patches = patches.select_random_sample(batch_size)
         return patches
     
@@ -424,12 +428,19 @@ class SparseSegmenter():
             n_vols = len(Xs)
             # sample volumes
             # use _get_xy
-            idx_vols = np.random.randint(0, n_vols, batch_size)
+            idx_vols = np.repeat(np.arange(0, n_vols), int(np.ceil(batch_size/n_vols)))
+            idx_vols = idx_vols[:batch_size]
             
-            
-
             xy = []
             for ivol in range(n_vols):
+                
+                
+                if np.sum(idx_vols == ivol) == 0:
+#                     continue
+                    import pdb; 
+                    print("DEBUG inside data_generator... ")
+                    import pdb; pdb.set_trace()
+                    
                 patches = self.get_patches(Xs[ivol].shape, \
                                            sampling_method, \
                                            np.sum(idx_vols == ivol),\

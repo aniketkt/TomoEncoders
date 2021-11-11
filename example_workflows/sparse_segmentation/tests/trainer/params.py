@@ -28,15 +28,15 @@ def get_training_params(TRAINING_INPUT_SIZE):
         # default
         pass
 
-    if TRAINING_INPUT_SIZE == (32,32,32):
-        training_params["training_input_size"] = (256,256,256)
-        training_params["batch_size"] = 4,
+    elif TRAINING_INPUT_SIZE == (32,32,32):
+        training_params["training_input_size"] = TRAINING_INPUT_SIZE
+        training_params["batch_size"] = 4
         training_params["max_stride"] = 2
         training_params["cutoff"] = 0.1
     
     elif TRAINING_INPUT_SIZE == (256,256,256):
-        training_params["training_input_size"] = (256,256,256)
-        training_params["batch_size"] = 4,
+        training_params["training_input_size"] = TRAINING_INPUT_SIZE
+        training_params["batch_size"] = 4
         training_params["max_stride"] = 2
         training_params["cutoff"] = 0.0
     else:
@@ -56,7 +56,7 @@ def get_model_params(model_tag):
     m = {"n_filters" : [16, 32, 64], \
          "n_blocks" : 3, \
          "activation" : 'lrelu', \
-         "batch_norm" : False, \
+         "batch_norm" : True, \
          "isconcat" : [True, True, True], \
          "pool_size" : [2,2,2], \
          "stdinput" : False}

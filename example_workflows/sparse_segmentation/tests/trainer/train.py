@@ -19,9 +19,9 @@ from datasets import get_datasets, dataset_names
 # INPUT SIZE CHANGE
 from params import *
 # model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
-model_tags = ["M_a02", "M_a01"]
-test_binning = 2
-TRAINING_INPUT_SIZE = (32,32,32)
+model_tags = ["M_a01"]
+test_binning = 1
+TRAINING_INPUT_SIZE = (64,64,64)
 
 def fit(fe, Xs, Ys):
     
