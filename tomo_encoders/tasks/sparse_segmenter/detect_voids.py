@@ -16,7 +16,7 @@ import time
 from tomo_encoders import Patches
 import numpy as np
 
-def wrapper_label(vol_seg, n_max_detect, TIMEIT = False):
+def wrapper_label(vol_seg, n_max_detect, TIMEIT = False, N_VOIDS_IGNORE = 2):
     '''
     takes in a big volume with zeros indicating voids and ones indicating material.  
     outputs labeled array with zero indicating material and labels [1, n_max_detect] indicating different voids.  
@@ -50,6 +50,14 @@ def wrapper_label(vol_seg, n_max_detect, TIMEIT = False):
     del s_voids
     # filter by size, "n" largest voids: hence ife = 0
     p3d_voids = p3d_voids.select_by_feature(n_max_detect, ife = 1, selection_by = "highest")
+    
+    p3d_voids = p3d_voids.select_by_feature(len(p3d_voids)-N_VOIDS_IGNORE, \
+                                           ife = 1, \
+                                           selection_by = "lowest")
+    p3d_voids = p3d_voids.select_by_feature(len(p3d_voids), \
+                                            ife = 1, \
+                                            selection_by = "highest")    
+    
     s_voids = p3d_voids.slices()
     
     # sub_vols_voids_b should contain only those voids that the sub-volume is pointing to.

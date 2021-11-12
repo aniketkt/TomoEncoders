@@ -158,6 +158,8 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
     -------
     
     '''
+    
+    
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
@@ -206,7 +208,7 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
     
     return obj.get()
 
-def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp = True, TIMEIT = False):
+def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False):
     '''
     
     Assumes the patches are on a regular (non-overlapping) grid.  
@@ -242,6 +244,9 @@ def recon_patches_3d(projs, theta, center, p3d, mem_limit_gpu = 5.0, apply_fbp =
 
     sub_vols = []
     from tqdm import tqdm
+    print("reconstructing selected 3D patches", \
+          tuple(p3d.widths[0,...]), \
+          "along %i z-chunks"%len(z_points_unique))
     for icount, z_point in enumerate(tqdm(z_points_unique)):
         p2d_z = p2d_sorted.filter_by_condition(p2d_sorted.features[:,0] == z_point)
 #         print("index %i, number of patches: %i"%(z_point, len(p2d_z)))  
@@ -285,8 +290,6 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
         center value for the projection data  
     p2d : Patches  
         patches (2d) on a given slice
-    mem_limit_gpu : float  
-        mem limit in GB for GPU  
     
     Returns
     -------

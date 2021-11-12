@@ -32,7 +32,6 @@ import time
 MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if count is exceeded.
 
 
-
 # complete once you write one or two feature extractors
 # class AnyFeatureExtractor(metaclass = abc.ABCMeta):
     
@@ -136,33 +135,6 @@ class SparseSegmenter():
             dict contains {"latent_embedder" : encoder_model, "CAE" : denoiser_model}. Here, both models are keras 3D models with input shape = input_size
 
         '''
-        ######### START GPU SETTINGS ############
-        ########### SET MEMORY GROWTH to True ############
-#         physical_devices = tf.config.list_physical_devices('GPU')
-#         try:
-#             tf.config.experimental.set_memory_growth(physical_devices[0], True)
-#         except:
-#             # Invalid device or cannot modify virtual devices once initialized.
-#             pass        
-
-        #### algorithm failed error
-        from tensorflow.compat.v1 import ConfigProto
-        from tensorflow.compat.v1 import InteractiveSession
-        config = ConfigProto()
-        config.gpu_options.allow_growth = True
-        session = InteractiveSession(config=config)
-        self.tf_session = session
-        ######### RUNTIME GPU USAGE ###########
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        if gpus:
-            try:
-                cfg = tf.config.experimental.VirtualDeviceConfiguration(memory_limit=gpu_mem_limit*1000.0)
-                tf.config.experimental.set_virtual_device_configuration(gpus[0], [cfg])
-            except RuntimeError as e:
-                print(e)        
-        
-        ######### END GPU SETTINGS ############
-
         model_getters = {"load-model" : self._load_models, \
                          "define-new" : self._build_models, \
                          "load-weights" : self._load_weights}
@@ -181,10 +153,17 @@ class SparseSegmenter():
         return
             
     def save_models(self, model_path):
-        
+
         for model_key in self.models.keys():
             inp_txt = "-".join([str(_t) for _t in list(self.input_size)])
-            self.models[model_key].save(os.path.join(model_path, "%s_%s_%s.hdf5"%(model_key, self.model_tag, inp_txt)))
+
+            model = self.models[model_key]
+            filepath = os.path.join(model_path, \
+                                    "%s_%s_%s.hdf5"%(model_key, \
+                                                     self.model_tag, inp_txt))
+            tf.keras.models.save_model(model, filepath,\
+                                       include_optimizer=False)        
+            
         return
     
     
@@ -501,7 +480,13 @@ class SparseSegmenter():
             else:
                 x_out = self.models['segmenter'].predict(x_in)
             out_arr[sb,...] = x_out
-
+        
+#         print("PREDICT PATCHES DEBUG: %.2f MIN, %.2f MAX"%(out_arr.min(), out_arr.max()))
+#         assert out_arr.max() == 1.0, "max value is not 1"
+#         assert out_arr.min() == 0.0, "min_value is not 0"
+#         assert out_arr.dtype == np.uint8, "not uint8"
+        
+        out_arr = np.round(out_arr).astype(np.uint8)
         t_unit = (time.time() - t0)*1000.0/nb
         
         if TIMEIT:

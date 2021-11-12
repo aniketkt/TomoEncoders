@@ -8,41 +8,60 @@ import numpy as np
 import cupy as cp 
 import time 
 import os 
+import tensorflow as tf
+
+
+######## START GPU SETTINGS ############
+########## SET MEMORY GROWTH to True ############
+physical_devices = tf.config.list_physical_devices('GPU')
+try:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+except:
+    # Invalid device or cannot modify virtual devices once initialized.
+    pass        
+######### END GPU SETTINGS ############
 
 
 ### READING DATA
-from tomo_encoders import DataFile
+
+projs_path = '/data02/MyArchive/AM_part_Xuan/projs' 
+from tomo_encoders import DataFile, Patches
 import h5py 
 
+
 ### DETECTOR / RECONSTRUCTION
-DET_BINNING = 4
+DET_BINNING = 2
 THETA_BINNING = 4
+PATCH_SIZE_REC = (64,64,64)
 from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d, recon_binning
 
 ### SEGMENTATION
+sys.path.append('../trainer')
+from params import *
 from tomo_encoders.tasks import SparseSegmenter
-INF_INPUT_SIZE_b = (32,32,32) # input size during inference for binned pass
-INF_INPUT_SIZE_1 = (64,64,64) # input size during inference for full pass (binning = 1)
-CHUNK_SIZE = 32
+INF_INPUT_SIZE_b = (128,128,128) # input size during inference for binned pass
+INF_INPUT_SIZE_1 = (256,256,256) # input size during inference for full pass (binning = 1)
+CHUNK_SIZE_b = 8 # detector binning
+CHUNK_SIZE_1 = 1 # full volume
 NORM_SAMPLING_FACTOR = 4
-model_tag = "M_a02"
+model_name = "M_a01_64-64-64"
 
 ### VOID ANALYSIS
 from tomo_encoders.tasks.sparse_segmenter.detect_voids import wrapper_label, to_regular_grid, upsample_sub_vols
-
-
+N_MAX_DETECT = 10
+N_VOIDS_IGNORE = 2
 
 ### VISUALIZATION
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
-
-
-projs_path = '/data02/MyArchive/AM_part_Xuan/projs' 
+demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
+plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
 fname = 'mli_L206_HT_650_L3_projs_bin2_ntheta1500.hdf5'
 read_fpath = os.path.join(projs_path, fname)
+import matplotlib as mpl
+mpl.use('Agg')
 
 
 ### TIMING
-
 TIMEIT_lev1 = True
 TIMEIT_lev2 = False
 
@@ -62,28 +81,27 @@ def calc_vol_shape(projs_shape):
 if __name__ == "__main__":
 
     
-        model_params = get_model_params(model_tag)
-        model_names = {"segmenter" : "segmenter_Unet_%s"%model_tag}
-        
-        print("#"*55, "\nWorking on model %s\n"%model_tag, "#"*55)
-        fe = SparseSegmenter(model_initialization = 'load-model', \
-                             model_names = model_names, \
-                             model_path = model_path, \
-                             input_size = INF_INPUT_SIZE_b)    
-        fe.test_speeds(CHUNK_SIZE)
-    
-    
-    
+    model_names = {"segmenter" : "segmenter_Unet_%s"%model_name}
+
+    print("#"*55, "\nWorking on model %s\n"%model_name, "#"*55)
+    fe = SparseSegmenter(model_initialization = 'load-model', \
+                         model_names = model_names, \
+                         model_path = model_path, \
+                         input_size = INF_INPUT_SIZE_b)    
+    fe.test_speeds(CHUNK_SIZE_b)
     
     with h5py.File(read_fpath, 'r') as hf:
         projs = np.asarray(hf['data'][:])
         theta = np.asarray(hf['theta'][:])
-        center = float(np.asarray(hf['center'][()]))    
+        center = projs.shape[-1]/2.0
+#         center = float(np.asarray(hf['center'][()]))    
+    
+    
 
-    PROJS_SHAPE = projs.shape
-    VOL_SHAPE = calc_vol_shape(PROJS_SHAPE)
-    print("projections shape: ", PROJS_SHAPE)
-    print("reconstructed volume shape: ", VOL_SHAPE)
+    PROJS_SHAPE_1 = projs.shape
+    VOL_SHAPE_1 = calc_vol_shape(PROJS_SHAPE_1)
+    print("projections shape: ", PROJS_SHAPE_1)
+    print("reconstructed volume shape: ", VOL_SHAPE_1)
     
     
     # BINNED RECONSTRUCTION
@@ -93,22 +111,59 @@ if __name__ == "__main__":
                               DET_BINNING, \
                               apply_fbp = True, \
                               TIMEIT = TIMEIT_lev1)
+    print("vol_rec_b shape: ", vol_rec_b.shape)
     
     # SEGMENTATION OF BINNED RECONSTRUCTION
     p3d_grid_b = Patches(vol_rec_b.shape, \
-                         initialize_by = "regular-grid", \
+                         initialize_by = "grid", \
                          patch_size = INF_INPUT_SIZE_b)
     sub_vols_x_b = p3d_grid_b.extract(vol_rec_b, INF_INPUT_SIZE_b)
     min_max = fe.calc_voxel_min_max(vol_rec_b, NORM_SAMPLING_FACTOR, TIMEIT = False)
-    sub_vols_y_pred_b = fe.predict_patches(sub_vols_x_b[...,np.newaxis], \
-                                      CHUNK_SIZE, None, \
-                                      min_max = min_max, \
-                                      TIMEIT = TIMEIT_lev1)[...,0]
+    
+    sub_vols_y_pred_b, _ = fe.predict_patches(sub_vols_x_b[...,np.newaxis], \
+                                           CHUNK_SIZE_b, None, \
+                                           min_max = min_max, \
+                                           TIMEIT = TIMEIT_lev1)
+    sub_vols_y_pred_b = sub_vols_y_pred_b[...,0]
+    
+    
     vol_seg_b = np.zeros(vol_rec_b.shape, dtype = np.uint8)
     p3d_grid_b.fill_patches_in_volume(sub_vols_y_pred_b, \
                                       vol_seg_b, TIMEIT = False)
     
     assert vol_seg_b.dtype == np.uint8, "data type check failed for vol_seg_b"
+    
+    print("vol_seg_b shape: ", vol_seg_b.shape)
+    fig, ax = plt.subplots(1, 3, figsize = (8,4))
+    view_midplanes(vol = fe.rescale_data(vol_rec_b, *min_max), ax = ax)
+    view_midplanes(vol = vol_seg_b, cmap = 'copper', alpha = 0.3, ax = ax)
+    plt.savefig(os.path.join(plot_out_path, "vols_b_%s.png"%model_name))
+    plt.close()
+
+    ##### VOID DETECTION STEP ############
+    sub_vols_voids_b, p3d_voids_b = wrapper_label(vol_seg_b, \
+                                                  N_MAX_DETECT, \
+                                                  TIMEIT = TIMEIT_lev1, \
+                                                  N_VOIDS_IGNORE = N_VOIDS_IGNORE)
+    p3d_grid_1_voids = to_regular_grid(sub_vols_voids_b, \
+                                       p3d_voids_b, \
+                                       PATCH_SIZE_REC, \
+                                       DET_BINNING, \
+                                       VOL_SHAPE_1)
+    
+    #### SELECTED PATCHES RECONSTRUCTED AT FULL RESOLUTION
+    sub_vols_voids_1, p3d_grid_voids_1 = recon_patches_3d(projs, theta, center, \
+                                                          p3d_grid_1_voids, \
+                                                          apply_fbp = True, \
+                                                          TIMEIT = TIMEIT_lev1)
+
+    print("length of sub_vols reconstructed %i"%len(sub_vols_voids_1))
+#     for ii in range(len(sub_vols_voids_1)):
+#         print("shape %i, %s"%(ii, str(sub_vols_voids_1[ii].shape)))
+    
+    
+    
+    exit()
     
     
     
