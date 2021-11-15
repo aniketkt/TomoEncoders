@@ -43,35 +43,27 @@ INF_INPUT_SIZE_1 = (64,64,64)
 CHUNK_SIZE_b = 32 # at detector binning
 CHUNK_SIZE_1 = 32 # full volume
 NORM_SAMPLING_FACTOR = 4
-model_name = "M_a04_64-64-64"
+model_name = "M_a05_64-64-64"
 
 ### VOID ANALYSIS
 from tomo_encoders.tasks.sparse_segmenter.detect_voids import wrapper_label, to_regular_grid, upsample_sub_vols
-N_MAX_DETECT = 3 # for 2 voids
-N_VOIDS_IGNORE = 1
+N_MAX_DETECT = 3 # 3 for 2 voids
+N_VOIDS_IGNORE = 0
 
 ### VISUALIZATION
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
-# fname = 'mli_L206_HT_650_L3_projs_bin2_ntheta1500.hdf5'
-fname = 'mli_L206_HT_650_L3_projs_bin1_ntheta3000.hdf5'
+fname = 'mli_L206_HT_650_L3_projs_bin2_ntheta1500.hdf5'
 read_fpath = os.path.join(projs_path, fname)
 import matplotlib as mpl
 mpl.use('Agg')
+
 
 ### TIMING
 TIMEIT_lev1 = True
 TIMEIT_lev2 = False
 
-########## SAMPLE CODE ###########
-
-# # sub_vols shape is (batch_size, nz, ny, nx) so use newaxis to get to (batch_size, nz, ny, nx, 1)
-# y_pred = self.predict_patches(sub_vols[...,np.newaxis], \
-#                               chunk_size, out_arr, \
-#                               min_max = min_max, \
-#                               TIMEIT = False)[...,0]
-# self.fill_patches_in_volume(y_pred, p, vol_out)
 
 def calc_vol_shape(projs_shape):
     ntheta, nz, nx = projs_shape
@@ -97,9 +89,10 @@ if __name__ == "__main__":
         center = projs.shape[-1]/2.0
 #         center = float(np.asarray(hf['center'][()]))    
     
+    
     t000 = time.time()
     print("\n\nSTART PROCESSING\n\n")
-
+    
     PROJS_SHAPE_1 = projs.shape
     VOL_SHAPE_1 = calc_vol_shape(PROJS_SHAPE_1)
     print("projections shape: ", PROJS_SHAPE_1)
@@ -121,8 +114,6 @@ if __name__ == "__main__":
                          patch_size = INF_INPUT_SIZE_b)
     sub_vols_x_b = p3d_grid_b.extract(vol_rec_b, INF_INPUT_SIZE_b)
     min_max = fe.calc_voxel_min_max(vol_rec_b, NORM_SAMPLING_FACTOR, TIMEIT = False)
-    
-    print("\n\nDEBUG: min, max for binned pass: %.4f, %.4f\n\n"%min_max)
     
     sub_vols_y_pred_b, _ = fe.predict_patches(sub_vols_x_b[...,np.newaxis], \
                                            CHUNK_SIZE_b, None, \
@@ -169,8 +160,6 @@ if __name__ == "__main__":
     max_val = sub_vols_grid_voids_1[:,::NORM_SAMPLING_FACTOR].max()
     min_max = (min_val, max_val)
     
-    print("\n\nDEBUG: min, max for full pass: %.4f, %.4f\n\n"%min_max)
-    
     fe.input_size = INF_INPUT_SIZE_1 # this may not be necessary to assign
     sub_vols_y_pred_1, _ = fe.predict_patches(sub_vols_grid_voids_1[...,np.newaxis], \
                                            CHUNK_SIZE_1, None, \
@@ -180,7 +169,7 @@ if __name__ == "__main__":
     
     
     
-    vol_seg_1 = np.ones(VOL_SHAPE_1, dtype = np.uint8)
+    vol_seg_1 = np.zeros(VOL_SHAPE_1, dtype = np.uint8)
     p3d_grid_voids_1.fill_patches_in_volume(sub_vols_y_pred_1, vol_seg_1, TIMEIT = TIMEIT_lev1)
     
     print("vol_seg_1 shape: ", vol_seg_1.shape)

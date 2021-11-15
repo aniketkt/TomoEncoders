@@ -13,13 +13,24 @@ import time
 from tomo_encoders.tasks import SparseSegmenter, load_dataset_pairs
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes
 
+
+######## START GPU SETTINGS ############
+########## SET MEMORY GROWTH to True ############
+physical_devices = tf.config.list_physical_devices('GPU')
+try:
+    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+except:
+    # Invalid device or cannot modify virtual devices once initialized.
+    pass        
+######### END GPU SETTINGS ############
+
 # descriptor_tag = 'tmp'#'test_noblanks_pt2cutoff_nostd'
 from datasets import get_datasets, dataset_names
 
 # INPUT SIZE CHANGE
 from params import *
-# model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03"]
-model_tags = ["M_a01"]
+# model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03", "M_a01"]
+model_tags = ["M_a02"]
 test_binning = 1
 TRAINING_INPUT_SIZE = (64,64,64)
 
@@ -36,7 +47,6 @@ def fit(fe, Xs, Ys):
     fe.save_models(model_path)
     t1_train = time.time()
     tot_training_time = (t1_train - t0_train)/60.0
-    fe.tf_session.close()
     print("\nTRAINING TIME: %.2f minutes"%tot_training_time)
     return fe
 

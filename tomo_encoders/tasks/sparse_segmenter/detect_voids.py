@@ -16,6 +16,13 @@ import time
 from tomo_encoders import Patches
 import numpy as np
 
+def calc_patch_size(base_size, multiplier):
+    
+    output = np.asarray(base_size)*multiplier
+    output = np.round(output).astype(np.uint32)
+    return tuple(output)
+
+
 def wrapper_label(vol_seg, n_max_detect, TIMEIT = False, N_VOIDS_IGNORE = 2):
     '''
     takes in a big volume with zeros indicating voids and ones indicating material.  
@@ -73,7 +80,7 @@ def wrapper_label(vol_seg, n_max_detect, TIMEIT = False, N_VOIDS_IGNORE = 2):
         
     return sub_vols_voids, p3d_voids
 
-def to_regular_grid(sub_vols, p3d, patch_size, upsample_value, new_vol_shape):
+def to_regular_grid(sub_vols, p3d, target_patch_size, target_vol_shape, upsample_fac):
     '''
     (1) select patches where voids exist (2) rescale to upsample_value
     '''
@@ -83,14 +90,17 @@ def to_regular_grid(sub_vols, p3d, patch_size, upsample_value, new_vol_shape):
     assert vol.max() == 1, "vol is not binary, which is required for the selection criteria"
 
     
-    p3d_grid = Patches(p3d.vol_shape, initialize_by="regular-grid", patch_size = patch_size)
-    y = p3d_grid.extract(vol, patch_size)
+    # make grid on binned volume
+    binned_patch_size = calc_patch_size(target_patch_size, 1.0/upsample_fac)
+    p3d_grid = Patches(p3d.vol_shape, initialize_by="regular-grid", patch_size = binned_patch_size)
+    
+    # select patches containing voids (voids are considered particles here (== 1))
+    y = p3d_grid.extract(vol, binned_patch_size)
     contains_voids = np.sum(y, axis = (1,2,3)) > 0
-    # select voids (voids are considered particles here (== 1))
     p3d_grid = p3d_grid.filter_by_condition(contains_voids)
     
-    if upsample_value is not None:
-        p3d_grid = p3d_grid.rescale(upsample_value, new_vol_shape)
+    # upsample back
+    p3d_grid = p3d_grid.rescale(upsample_fac, target_vol_shape)
     return p3d_grid
 
 

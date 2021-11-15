@@ -30,7 +30,10 @@ import abc
 import time
 
 MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if count is exceeded.
-
+# Parameters for weighted cross-entropy and focal loss - alpha is higher than 0.5 to emphasize loss in "ones" or metal pixels.
+eps = 1e-12
+alpha = 0.75
+gamma = 2.0
 
 # complete once you write one or two feature extractors
 # class AnyFeatureExtractor(metaclass = abc.ABCMeta):
@@ -43,6 +46,35 @@ MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if coun
 #         pass
 
 DEFAULT_INPUT_SIZE = (64,64,64)
+
+def _binary_lossmap(y_true, y_pred):
+    # y_true, y_pred are tensors of shape (batch_size, img_h, img_w, n_channels)
+    pt_1 = tf.where(tf.equal(y_true, 1), y_pred, tf.ones_like(y_pred))
+    pt_0 = tf.where(tf.equal(y_true, 0), y_pred, tf.zeros_like(y_pred))
+    return pt_1, pt_0
+
+def focal_loss(y_true, y_pred):
+    """
+    :return: loss value
+    
+    Focal loss is defined here: https://arxiv.org/abs/1708.02002
+    Using this provides improved fidelity in unbalanced datasets: 
+    Tekawade et al. https://doi.org/10.1117/12.2540442
+    
+    
+    Parameters
+    ----------
+    
+    y_true  : tensor
+            Ground truth tensor of shape (batch_size, n_rows, n_cols, n_channels)
+    y_pred  : tensor
+            Predicted tensor of shape (batch_size, n_rows, n_cols, n_channels)
+    
+    """
+
+    pt_1, pt_0 = _binary_lossmap(y_true, y_pred)
+    loss_map = -alpha*tf.math.log(pt_1 + eps)*tf.math.pow(1. - pt_1,gamma) - (1-alpha)*tf.math.log(1. - pt_0 + eps)*tf.math.pow(pt_0,gamma)
+    return tf.reduce_mean(loss_map)
 
 def read_data_pair(ds_X, ds_Y, s_crops, normalize_sampling_factor):
 
@@ -202,7 +234,7 @@ class SparseSegmenter():
         # input_size here is redundant if the network is fully convolutional
         self.models["segmenter"] = build_Unet_3D(None, **model_params) 
         self.models["segmenter"].compile(optimizer=tf.keras.optimizers.Adam(),\
-                      loss=tf.keras.losses.BinaryCrossentropy())
+                                         loss= tf.keras.losses.BinaryCrossentropy()) #focal_loss)
         return
     
     def _load_weights(self, **kwargs):

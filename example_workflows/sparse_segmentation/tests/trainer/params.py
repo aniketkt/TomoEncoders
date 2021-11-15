@@ -21,7 +21,7 @@ def get_training_params(TRAINING_INPUT_SIZE):
                        "random_rotate" : True, \
                        "add_noise" : 0.05, \
                        "max_stride" : 8, \
-                       "cutoff" : 0.2, \
+                       "cutoff" : 0.3, \
                        "normalize_sampling_factor": 4}
     
     if TRAINING_INPUT_SIZE == (64,64,64):
@@ -85,6 +85,10 @@ def get_model_params(model_tag):
     # a05 - shallow model - 2 max equal-sized max pools with more filters (results in bigger bottleneck size?)
     elif model_tag == "M_a05":
         model_params["n_filters"] = [32, 64]
+        model_params["pool_size"] = [ 2,  2]
+        
+    elif model_tag == "M_a06":
+        model_params["n_filters"] = [16, 32]
         model_params["pool_size"] = [ 2,  2]
         
     else:

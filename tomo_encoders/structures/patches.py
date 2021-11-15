@@ -50,9 +50,17 @@ class Patches():
 
         if initialize_by == "file":
             self._load_from_disk(**kwargs)
+            # cast to integer dtype
+            self.points = self.points.astype(np.uint32)
+            self.widths = self.widths.astype(np.uint32)
             return
         else:
             self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
+            
+            # cast to integer dtype
+            self.points = self.points.astype(np.uint32)
+            self.widths = self.widths.astype(np.uint32)
+            
             self._check_valid_points()
             # append features if passed
             self.features = None
@@ -712,6 +720,7 @@ class Patches():
         s = self.slices()
         for idx in range(len(self)):
                 vol_out[tuple(s[idx,...])] = sub_vols[idx]
+            
         t1 = time.time()
         t_tot = (t1-t0)*1000.0/len(self)
         if TIMEIT:
