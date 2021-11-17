@@ -30,9 +30,11 @@ import h5py
 
 
 ### DETECTOR / RECONSTRUCTION
+PROJS_FILENAME = 'mli_L206_HT_650_L3_projs_bin1_ntheta3000.hdf5'
 DET_BINNING = 4 # detector binning
 THETA_BINNING = 4
 from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d, recon_binning
+from tomo_encoders.tasks.sparse_segmenter.sparse_segmenter import modified_autocontrast
 
 ### SEGMENTATION
 sys.path.append('../trainer')
@@ -43,19 +45,18 @@ INF_INPUT_SIZE_1 = (64,64,64)
 CHUNK_SIZE_b = 32 # at detector binning
 CHUNK_SIZE_1 = 32 # full volume
 NORM_SAMPLING_FACTOR = 4
-model_name = "M_a05_64-64-64"
+model_name = "M_a02_64-64-64"
 
 ### VOID ANALYSIS
 from tomo_encoders.tasks.sparse_segmenter.detect_voids import wrapper_label, to_regular_grid, upsample_sub_vols
 N_MAX_DETECT = 3 # 3 for 2 voids
-N_VOIDS_IGNORE = 0
+N_VOIDS_IGNORE = 1
 
 ### VISUALIZATION
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
-fname = 'mli_L206_HT_650_L3_projs_bin2_ntheta1500.hdf5'
-read_fpath = os.path.join(projs_path, fname)
+read_fpath = os.path.join(projs_path, PROJS_FILENAME)
 import matplotlib as mpl
 mpl.use('Agg')
 
@@ -68,8 +69,6 @@ TIMEIT_lev2 = False
 def calc_vol_shape(projs_shape):
     ntheta, nz, nx = projs_shape
     return (nz, nx, nx)
-
-    
 
 if __name__ == "__main__":
 
@@ -108,6 +107,11 @@ if __name__ == "__main__":
                               TIMEIT = TIMEIT_lev1)
     print("vol_rec_b shape: ", vol_rec_b.shape)
     
+    ##### CLIP WITH AUTOCONTRAST #####
+    clip_vals = modified_autocontrast(vol_rec_b, s = 0.05, \
+                                      normalize_sampling_factor = NORM_SAMPLING_FACTOR)
+    vol_rec_b = np.clip(vol_rec_b, *clip_vals)
+    
     # SEGMENTATION OF BINNED RECONSTRUCTION
     p3d_grid_b = Patches(vol_rec_b.shape, \
                          initialize_by = "grid", \
@@ -115,6 +119,8 @@ if __name__ == "__main__":
     sub_vols_x_b = p3d_grid_b.extract(vol_rec_b, INF_INPUT_SIZE_b)
     min_max = fe.calc_voxel_min_max(vol_rec_b, NORM_SAMPLING_FACTOR, TIMEIT = False)
     
+    
+    print("MIN MAX at binned reconstruction step: ", min_max)
     sub_vols_y_pred_b, _ = fe.predict_patches(sub_vols_x_b[...,np.newaxis], \
                                            CHUNK_SIZE_b, None, \
                                            min_max = min_max, \
@@ -151,8 +157,13 @@ if __name__ == "__main__":
                                                           p3d_grid_1_voids, \
                                                           apply_fbp = True, \
                                                           TIMEIT = TIMEIT_lev1)
-
+    
     print("length of sub_vols reconstructed %i"%len(sub_vols_grid_voids_1))
+
+    ##### CLIP WITH AUTOCONTRAST #####
+    clip_vals = modified_autocontrast(np.asarray(sub_vols_grid_voids_1), s = 0.05, \
+                                      normalize_sampling_factor = NORM_SAMPLING_FACTOR)
+    sub_vols_grid_voids_1 = np.clip(sub_vols_grid_voids_1, *clip_vals)
     
     #### SEGMENT RECONSTRUCTED PATCHES AT FULL RESOLUTION  
     
@@ -169,7 +180,7 @@ if __name__ == "__main__":
     
     
     
-    vol_seg_1 = np.zeros(VOL_SHAPE_1, dtype = np.uint8)
+    vol_seg_1 = np.ones(VOL_SHAPE_1, dtype = np.uint8)
     p3d_grid_voids_1.fill_patches_in_volume(sub_vols_y_pred_1, vol_seg_1, TIMEIT = TIMEIT_lev1)
     
     print("vol_seg_1 shape: ", vol_seg_1.shape)

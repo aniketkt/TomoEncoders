@@ -758,6 +758,52 @@ def _find_min_max(vol, sampling_factor, TIMEIT = False):
         _msg_exec_time("find voxel min max", tot_time)            
     return min_val, max_val
 
+
+def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
+    
+    '''
+    Returns
+    -------
+    tuple
+        alow, ahigh values to clamp data  
+    
+    Parameters
+    ----------
+    s : float
+        quantile of image data to saturate. E.g. s = 0.01 means saturate the lowest 1% and highest 1% pixels
+    
+    '''
+    
+    sbin = slice(None, None, normalize_sampling_factor)
+    
+    if vol.ndim == 4:
+        intensity_vals = vol[:, sbin, sbin, sbin].reshape(-1)
+    elif vol.ndim == 3:
+        intensity_vals = vol[sbin, sbin, sbin].reshape(-1)
+    
+    
+    data_type  = np.asarray(intensity_vals).dtype
+    
+    
+    if type(s) == tuple and len(s) == 2:
+        slow, shigh = s
+    else:
+        slow = s
+        shigh = s
+
+    h, bins = np.histogram(intensity_vals, bins = 500)
+    c = np.cumsum(h)
+    c_norm = c/np.max(c)
+    
+    ibin_low = np.argmin(np.abs(c_norm - slow))
+    ibin_high = np.argmin(np.abs(c_norm - 1 + shigh))
+    
+    alow = bins[ibin_low]
+    ahigh = bins[ibin_high]
+    
+    return alow, ahigh
+
+
 def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TIMEIT = False):
     '''
     Normalizes volume to values into range [0,1]  
@@ -766,7 +812,7 @@ def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TI
 
     tot_len = vol.shape[0]
     nchunks = int(np.ceil(tot_len/chunk_size))
-    max_val, min_val = _find_min_max(vol, normalize_sampling_factor)
+    min_val, max_val = _find_min_max(vol, normalize_sampling_factor)
     
     proc_times = []
     copy_to_times = []

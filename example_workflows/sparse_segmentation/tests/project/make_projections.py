@@ -57,7 +57,7 @@ if __name__ == "__main__":
     
     nz = vol.shape[0] 
     n = vol.shape[-1] 
-    center = n/2.0 
+    center_padded = n/2.0 
     r = nz//2 # +overlap? because some border pixels are being missed by solver 
     s1 = slice(None,r,None) 
     s2 = slice(-r,None,None) 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     ngpus=1 
     # Class gpu solver 
     t0 = time.time() 
-    with pt.SolverTomo(theta, ntheta, r, n, pnz, center, ngpus) as slv: 
+    with pt.SolverTomo(theta, ntheta, r, n, pnz, center_padded, ngpus) as slv: 
         # generate data 
         data = slv.fwd_tomo_batch(u0) 
 
@@ -81,7 +81,9 @@ if __name__ == "__main__":
     if padding_z == 0:
         projs = projs[:, :, padding:-padding]     
     else:
-        projs = projs[:, :-padding_z, padding:-padding]     
+        projs = projs[:, :-padding_z, padding:-padding] 
+    
+    center = center_padded - padding
     
     print("time %.4f"%(time.time()- t0)) 
     print("projections shape: %s"%str(projs.shape)) 
@@ -92,4 +94,4 @@ if __name__ == "__main__":
     with h5py.File(save_fpath, 'w') as hf:
         hf.create_dataset('data', data = projs)
         hf.create_dataset('theta', data = theta)
-        hf.create_dataset('center', data = projs.shape[2]/2)
+        hf.create_dataset('center', data = center)

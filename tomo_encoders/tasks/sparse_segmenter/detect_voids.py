@@ -85,11 +85,14 @@ def to_regular_grid(sub_vols, p3d, target_patch_size, target_vol_shape, upsample
     (1) select patches where voids exist (2) rescale to upsample_value
     '''
     # make vol_seg_b
-    vol = np.empty(p3d.vol_shape, dtype = sub_vols[0].dtype)
+    vol = np.zeros(p3d.vol_shape, dtype = sub_vols[0].dtype)
     p3d.fill_patches_in_volume(sub_vols, vol)    
-    assert vol.max() == 1, "vol is not binary, which is required for the selection criteria"
-
     
+    if vol.max() != 1:
+        print("DEBUG inside to_regular_grid because vol.max is not 1")
+        import pdb; pdb.set_trace()
+#     assert vol.max() == 1, "vol is not binary, which is required for the selection criteria"
+
     # make grid on binned volume
     binned_patch_size = calc_patch_size(target_patch_size, 1.0/upsample_fac)
     p3d_grid = Patches(p3d.vol_shape, initialize_by="regular-grid", patch_size = binned_patch_size)

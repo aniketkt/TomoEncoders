@@ -24,7 +24,6 @@ def minus_log(data):
     data = -cp.log(cp.maximum(data, 1e-6))
     return data
 
-
 def show_orthoplane(self, axis, idx, prev_img = None):
 
     # convert p3d to p2d
@@ -348,6 +347,7 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
         
 #     print("\n")
     return sub_vols
+
 
 ######### TRASH - RECON PATCH ##########
 # def test_recon_patch(projs, theta, center, point, width, apply_fbp = True):
