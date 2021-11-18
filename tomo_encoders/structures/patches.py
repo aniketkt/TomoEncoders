@@ -522,6 +522,29 @@ class Patches():
                        names = _names)
         
 
+    def pop(self, n_pop):
+        
+        '''
+        Parameters
+        ----------
+        n_pop : int
+            If n_pop is negative, pop from end else pop from beginning
+        
+        '''
+        if n_pop > 0:
+            spop = slice(n_pop, None, None)
+        elif n_pop < 0:
+            spop = slice(None, n_pop, None)
+        else:
+            return self.copy()
+            
+        return Patches(self.vol_shape, initialize_by = "data", \
+                       points = self.points.copy()[spop,...],\
+                       widths = self.widths.copy()[spop,...],\
+                       features = None if self.features is None else self.features.copy()[spop,...], \
+                       names = self.feature_names.copy() if any(self.feature_names) else [])
+        
+        
     def rescale(self, fac, new_vol_shape):
         '''
         '''

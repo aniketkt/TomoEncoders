@@ -59,8 +59,8 @@ N_VOIDS_IGNORE = 1
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
-import matplotlib as mpl
-mpl.use('Agg')
+#import matplotlib as mpl
+#mpl.use('Agg')
 
 
 ### TIMING
@@ -126,6 +126,7 @@ def process_data(projs, theta, center, fe):
     view_midplanes(vol = fe.rescale_data(vol_rec_b, *min_max), ax = ax)
     view_midplanes(vol = vol_seg_b, cmap = 'copper', alpha = 0.3, ax = ax)
     plt.savefig(os.path.join(plot_out_path, "vols_b_%s.png"%model_name))
+#     plt.show()
     plt.close()
 
     ##### VOID DETECTION STEP ############
@@ -133,6 +134,12 @@ def process_data(projs, theta, center, fe):
                                                   N_MAX_DETECT, \
                                                   TIMEIT = TIMEIT_lev1, \
                                                   N_VOIDS_IGNORE = N_VOIDS_IGNORE)
+    
+    import vedo
+    surf = vedo.Volume(sub_vols_voids_b[0], \
+                       mode = 0).isosurface(0.5).smooth().subdivide()
+    import pdb; pdb.set_trace()
+    vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
     
     p3d_grid_1_voids = to_regular_grid(sub_vols_voids_b, \
                                        p3d_voids_b, \
@@ -175,10 +182,9 @@ def process_data(projs, theta, center, fe):
     fig, ax = plt.subplots(1, 3, figsize = (8,4))
     view_midplanes(vol = vol_seg_1, cmap = 'copper', ax = ax)
     plt.savefig(os.path.join(plot_out_path, "vols_1_%s.png"%model_name))
-    plt.close()
-
-
     print("TOTAL TIME ELAPSED: %.2f seconds"%(time.time() - t000))
+#     plt.show()
+    plt.close()
     return
 
 
@@ -216,7 +222,7 @@ if __name__ == "__main__":
         print("\nDOMAIN SHAPE: ", vol.shape)
 #         pdb.set_trace()
 #         point = (550, 2000, 1800)
-        point = (550, 1800, 1800)
+        point = (550, 2100, 2100)
         projs, theta, center = acquire_data(vol, point, DET_NTHETA, FOV = DET_FOV, pnz = DET_PNZ)    
         process_data(projs, theta, center, fe)
         iter_count += 1

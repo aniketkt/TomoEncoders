@@ -10,8 +10,9 @@ import cupy as cp
 import time
 import h5py
 import signal 
-import tomocg as pt
 
+import tomocg as pt
+import os
 
 
 def get_projections(vol, theta, center, pnz):
@@ -64,7 +65,7 @@ def get_projections(vol, theta, center, pnz):
     return projs, theta, center
 
 
-def acquire_data(vol_full, point, ntheta, FOV = (1920,1200), pnz = 4):
+def acquire_data(vol_full, projs_path, point, ntheta, FOV = (1920,1200), pnz = 4):
     
     '''
     Parameters
@@ -98,10 +99,40 @@ def acquire_data(vol_full, point, ntheta, FOV = (1920,1200), pnz = 4):
     theta = np.linspace(0,np.pi,ntheta,dtype='float32') 
     center = projs_w/2.0 
 
-    return get_projections(vol, theta, center, pnz)
+    
+    projs, theta, center = get_projections(vol, theta, center, pnz)
+    
+    
+    if projs_path is not None:
+        save_fpath = os.path.join(projs_path, \
+                                  'projs_point_z%i_y%i_x%i_ntheta%i_%ix%i.hdf5'%(iz, \
+                                                                                 iy, ix, \
+                                                                                 ntheta, FOV[1], FOV[0]))
+        with h5py.File(save_fpath, 'w') as hf:
+            hf.create_dataset('data', data = projs)
+            hf.create_dataset('theta', data = theta)
+            hf.create_dataset('center', data = center)
+    
+    return projs, theta, center
 
-
-
+def read_data(projs_path, point, ntheta, FOV = (1920,1200)):
+    
+    iz, iy, ix = point
+    read_fpath = os.path.join(projs_path, \
+                              'projs_point_z%i_y%i_x%i_ntheta%i_%ix%i.hdf5'%(iz, \
+                                                                             iy, ix, \
+                                                                             ntheta, FOV[1], FOV[0]))
+    if not os.path.exists(read_fpath):
+        return None, None, None
+        print("DEBUG because projections file not found")
+        import pdb; pdb.set_trace()
+        
+    with h5py.File(read_fpath, 'r') as hf:
+        projs = np.asarray(hf['data'][:])
+        theta = np.asarray(hf['theta'][:])
+        center = float(np.asarray(hf['center'][()]))    
+    
+    return projs, theta, center
 
 if __name__ == "__main__":
     

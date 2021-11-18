@@ -22,63 +22,67 @@ def calc_patch_size(base_size, multiplier):
     output = np.round(output).astype(np.uint32)
     return tuple(output)
 
-
-def wrapper_label(vol_seg, n_max_detect, TIMEIT = False, N_VOIDS_IGNORE = 2):
+def export_voids(vol_seg, n_max_detect, TIMEIT = False, n_surfaces = 1):
     '''
-    takes in a big volume with zeros indicating voids and ones indicating material.  
-    outputs labeled array with zero indicating material and labels [1, n_max_detect] indicating different voids.  
-    if n_max_detect is smaller than the total number detected, the smaller voids are ignored and assigned values of background ( = 0)
-    finally, array dtype is adjusted based on number of voids. e.g. if n_detected < 2**8 - 1, then array is uint8, etc.
     '''
     
     assert vol_seg.dtype == 'uint8', "vol_seg must be uint8"
     
     t0 = time.time()
-    print("detecting all particles up to max possible integer precision")
     vol_lab, n_detected,  = label_np(vol_seg^1)
     s_voids = find_objects(vol_lab)
-    print("found %i"%n_detected)
-    
-    # DEBUG ONLY
-    assert len(s_voids) == n_detected, "find_objects test failed: detected number of slice objects does not match output from label"    
+    print("Total voids detected: %i"%n_detected)
     
     print("finding objects and sorting by size (decreasing order)")
     p3d_voids = Patches(vol_lab.shape, initialize_by="slices", s = s_voids)
-    # create feature array - ["void_id", "void_size"]
-    void_features = np.zeros((len(s_voids), 2))
-    for ip in range(len(s_voids)):
+    feature_names = ["void_id", "void_size", "cent_iz", "cent_iy", "cent_ix"]
+    void_features = np.zeros((len(s_voids), len(feature_names)))
+    
+    for ip in range(len(p3d_voids)):
         void_id = ip + 1
         sub_vol = (vol_lab[s_voids[ip]] == void_id).astype(np.uint8)
         void_size = np.cbrt(np.sum(sub_vol))
         void_features[ip, 0] = void_id
         void_features[ip, 1] = void_size
-    p3d_voids.add_features(void_features, names = ["void_id", "void_size"])    
-    
+    void_features[:, 2:] = (p3d_voids.centers()).astype(np.uint32)
+    p3d_voids.add_features(void_features, names = feature_names)    
     del s_voids
+    
+    
     # filter by size, "n" largest voids: hence ife = 0
-    p3d_voids = p3d_voids.select_by_feature(n_max_detect, ife = 1, selection_by = "highest")
-    
-    p3d_voids = p3d_voids.select_by_feature(len(p3d_voids)-N_VOIDS_IGNORE, \
-                                           ife = 1, \
-                                           selection_by = "lowest")
-    p3d_voids = p3d_voids.select_by_feature(len(p3d_voids), \
-                                            ife = 1, \
-                                            selection_by = "highest")    
-    
+    p3d_voids = p3d_voids.select_by_feature(n_max_detect + n_surfaces, ife = 1, selection_by = "highest")
+    void_id_surfs = p3d_voids.features[:n_surfaces,0].astype(int)
+    p3d_voids = p3d_voids.pop(n_surfaces)
     s_voids = p3d_voids.slices()
+    # RETURN p3d_voids
+    
+    # export surface of the volume
+    vol_surf = np.zeros_like(vol_seg)
+    for void_id_surf in void_id_surfs:
+        vol_surf[vol_lab == void_id_surf] = 1
+    # RETURN vol_surf
     
     # sub_vols_voids_b should contain only those voids that the sub-volume is pointing to.
     # Need to ignore others occuring in the sub_vol by coincidence.
     sub_vols_voids = []
     for ip in range(len(p3d_voids)):
         sub_vols_voids.append((vol_lab[tuple(s_voids[ip,:])] == p3d_voids.features[ip,0]).astype(np.uint8))
-
+    # RETURN sub_vols_voids
+        
+    
+    # make vol_seg_b
+    # to-do - select a specific void as IDX_VOID_SELECT and show it in different color
+    vol_voids = np.zeros(p3d_voids.vol_shape, dtype = sub_vols_voids[0].dtype)
+    p3d_voids.fill_patches_in_volume(sub_vols_voids, vol_voids)    
+    # RETURN vol_voids
+    
     t1 = time.time()
     t_tot = t1 - t0
     if TIMEIT:
         print("TIME for counting voids: %.2f seconds"%t_tot)
         
-    return sub_vols_voids, p3d_voids
+    return sub_vols_voids, p3d_voids, vol_surf, vol_voids
+
 
 def to_regular_grid(sub_vols, p3d, target_patch_size, target_vol_shape, upsample_fac):
     '''
@@ -149,6 +153,71 @@ def upsample_sub_vols(sub_vols, upsampling_fac, TIMEIT = False, order = 1):
     print('total bytes: ', memory_pool.total_bytes())    
     
     return sub_vols_up
+
+
+
+# def wrapper_label(vol_seg, n_max_detect, TIMEIT = False, N_VOIDS_IGNORE = 2):
+#     '''
+#     takes in a big volume with zeros indicating voids and ones indicating material.  
+#     outputs labeled array with zero indicating material and labels [1, n_max_detect] indicating different voids.  
+#     if n_max_detect is smaller than the total number detected, the smaller voids are ignored and assigned values of background ( = 0)
+#     finally, array dtype is adjusted based on number of voids. e.g. if n_detected < 2**8 - 1, then array is uint8, etc.
+#     '''
+    
+#     assert vol_seg.dtype == 'uint8', "vol_seg must be uint8"
+    
+#     t0 = time.time()
+#     print("detecting all particles up to max possible integer precision")
+#     vol_lab, n_detected,  = label_np(vol_seg^1)
+#     s_voids = find_objects(vol_lab)
+#     print("found %i"%n_detected)
+    
+#     # DEBUG ONLY
+#     assert len(s_voids) == n_detected, "find_objects test failed: detected number of slice objects does not match output from label"    
+    
+#     print("finding objects and sorting by size (decreasing order)")
+#     p3d_voids = Patches(vol_lab.shape, initialize_by="slices", s = s_voids)
+#     # create feature array - ["void_id", "void_size"]
+#     void_features = np.zeros((len(s_voids), 2))
+#     for ip in range(len(s_voids)):
+#         void_id = ip + 1
+#         sub_vol = (vol_lab[s_voids[ip]] == void_id).astype(np.uint8)
+#         void_size = np.cbrt(np.sum(sub_vol))
+#         void_features[ip, 0] = void_id
+#         void_features[ip, 1] = void_size
+#     p3d_voids.add_features(void_features, names = ["void_id", "void_size"])    
+    
+#     del s_voids
+#     # filter by size, "n" largest voids: hence ife = 0
+#     p3d_voids = p3d_voids.select_by_feature(n_max_detect, ife = 1, selection_by = "highest")
+    
+#     p3d_voids = p3d_voids.select_by_feature(len(p3d_voids)-N_VOIDS_IGNORE, \
+#                                            ife = 1, \
+#                                            selection_by = "lowest")
+#     p3d_voids = p3d_voids.select_by_feature(len(p3d_voids), \
+#                                             ife = 1, \
+#                                             selection_by = "highest")    
+    
+#     s_voids = p3d_voids.slices()
+    
+#     # sub_vols_voids_b should contain only those voids that the sub-volume is pointing to.
+#     # Need to ignore others occuring in the sub_vol by coincidence.
+#     sub_vols_voids = []
+#     for ip in range(len(p3d_voids)):
+#         sub_vols_voids.append((vol_lab[tuple(s_voids[ip,:])] == p3d_voids.features[ip,0]).astype(np.uint8))
+
+#     t1 = time.time()
+#     t_tot = t1 - t0
+#     if TIMEIT:
+#         print("TIME for counting voids: %.2f seconds"%t_tot)
+        
+#     return sub_vols_voids, p3d_voids
+
+
+
+
+
+
 
 if __name__ == "__main__":
 

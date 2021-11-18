@@ -91,6 +91,7 @@ if __name__ == "__main__":
     filename = os.path.split(fpath)[-1].split('_rec_1x1_uint16.hdf5')[0]
     save_fpath = os.path.join(projs_path, filename + '_projs_bin%i_ntheta%i.hdf5'%(binning,ntheta))
     
+    
     with h5py.File(save_fpath, 'w') as hf:
         hf.create_dataset('data', data = projs)
         hf.create_dataset('theta', data = theta)
