@@ -22,7 +22,7 @@ def calc_patch_size(base_size, multiplier):
     output = np.round(output).astype(np.uint32)
     return tuple(output)
 
-def export_voids(vol_seg, n_max_detect, TIMEIT = False, n_surfaces = 1):
+def export_voids(vol_seg, n_max_detect, TIMEIT = False):
     '''
     '''
     
@@ -50,39 +50,24 @@ def export_voids(vol_seg, n_max_detect, TIMEIT = False, n_surfaces = 1):
     
     
     # filter by size, "n" largest voids: hence ife = 0
-    p3d_voids = p3d_voids.select_by_feature(n_max_detect + n_surfaces, ife = 1, selection_by = "highest")
-    void_id_surfs = p3d_voids.features[:n_surfaces,0].astype(int)
-    p3d_voids = p3d_voids.pop(n_surfaces)
+    p3d_voids = p3d_voids.select_by_feature(n_max_detect, \
+                                            ife = 1, \
+                                            selection_by = "highest")
     s_voids = p3d_voids.slices()
     # RETURN p3d_voids
-    
-    # export surface of the volume
-    vol_surf = np.zeros_like(vol_seg)
-    for void_id_surf in void_id_surfs:
-        vol_surf[vol_lab == void_id_surf] = 1
-    # RETURN vol_surf
-    
     # sub_vols_voids_b should contain only those voids that the sub-volume is pointing to.
     # Need to ignore others occuring in the sub_vol by coincidence.
     sub_vols_voids = []
     for ip in range(len(p3d_voids)):
         sub_vols_voids.append((vol_lab[tuple(s_voids[ip,:])] == p3d_voids.features[ip,0]).astype(np.uint8))
     # RETURN sub_vols_voids
-        
-    
-    # make vol_seg_b
-    # to-do - select a specific void as IDX_VOID_SELECT and show it in different color
-    vol_voids = np.zeros(p3d_voids.vol_shape, dtype = sub_vols_voids[0].dtype)
-    p3d_voids.fill_patches_in_volume(sub_vols_voids, vol_voids)    
-    # RETURN vol_voids
     
     t1 = time.time()
     t_tot = t1 - t0
     if TIMEIT:
         print("TIME for counting voids: %.2f seconds"%t_tot)
         
-    return sub_vols_voids, p3d_voids, vol_surf, vol_voids
-
+    return sub_vols_voids, p3d_voids
 
 def to_regular_grid(sub_vols, p3d, target_patch_size, target_vol_shape, upsample_fac):
     '''

@@ -17,12 +17,32 @@ from tomo_encoders.tasks.sparse_segmenter.sparse_segmenter import modified_autoc
 from tomo_encoders.tasks.sparse_segmenter.detect_voids import to_regular_grid, export_voids
 from tomo_encoders import Patches
 
+
+def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
+    
+    vol_shape = out_vol.shape
+    assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
+    
+    shape_yx = vol_shape[1]
+    shape_z = vol_shape[0]
+    rad = int(mask_fac*shape_yx/2)
+    
+    pts = np.arange(-int(shape_yx//2), int(np.ceil(shape_yx//2)))
+    yy, xx = np.meshgrid(pts, pts, indexing = 'ij')
+    circ = (np.sqrt(yy**2 + xx**2) < rad).astype(np.uint8) # inside is positive
+    circ = circ[np.newaxis, ...]
+    cyl = np.repeat(circ, shape_z, axis = 0)
+    
+    out_vol[cyl == 0] = 0
+    
+    return
+
 class VoidDetector():
     '''
     '''
     def __init__(self, THETA_BINNING, DET_BINNING, \
                  INF_INPUT_SIZE, INF_CHUNK_SIZE,\
-                 N_MAX_DETECT, N_SURFACES,
+                 N_MAX_DETECT, CIRC_MASK_FRAC,
                  TIMEIT_lev1 = True, TIMEIT_lev2 = False, \
                  NORM_SAMPLING_FACTOR = 4):
         '''
@@ -32,7 +52,8 @@ class VoidDetector():
         self.INF_INPUT_SIZE = INF_INPUT_SIZE
         self.INF_CHUNK_SIZE = INF_CHUNK_SIZE
         self.N_MAX_DETECT = N_MAX_DETECT
-        self.N_SURFACES = N_SURFACES
+        self.CIRC_MASK_FRAC = CIRC_MASK_FRAC
+        
         self.TIMEIT_lev1 = TIMEIT_lev1
         self.TIMEIT_lev2 = TIMEIT_lev2
         self.NORM_SAMPLING_FACTOR = NORM_SAMPLING_FACTOR
@@ -47,7 +68,7 @@ class VoidDetector():
                                   self.DET_BINNING, \
                                   apply_fbp = True, \
                                   TIMEIT = self.TIMEIT_lev2)
-        print("vol_rec_b shape: ", vol_rec_b.shape)
+#         print("vol_rec_b shape: ", vol_rec_b.shape)
 
         ##### CLIP WITH AUTOCONTRAST #####
         clip_vals = modified_autocontrast(vol_rec_b, s = 0.05, \
@@ -123,17 +144,16 @@ class VoidDetector():
         p3d_grid_b.fill_patches_in_volume(sub_vols_y_pred_b, \
                                           vol_seg_b, TIMEIT = False)
         assert vol_seg_b.dtype == np.uint8, "data type check failed for vol_seg_b"
-        print("vol_seg_b shape: ", vol_seg_b.shape)
+#         print("vol_seg_b shape: ", vol_seg_b.shape)
+        
+        cylindrical_mask(vol_seg_b, self.CIRC_MASK_FRAC, mask_val = 0)
+        
         return vol_seg_b
     
     def export_voids(self, vol_seg):
         return export_voids(vol_seg, \
                             self.N_MAX_DETECT, \
-                            TIMEIT = self.TIMEIT_lev2, \
-                            n_surfaces = self.N_SURFACES)        
-
-
-
+                            TIMEIT = self.TIMEIT_lev2)  
 
 
 

@@ -522,6 +522,23 @@ class Patches():
                        names = _names)
         
 
+    def select_by_range(self, s_sel):
+
+        '''
+        Parameters
+        ----------
+        s_sel : tuple
+            range (start, stop)
+        
+        '''
+        s_sel = slice(s_sel[0], s_sel[1], None)
+            
+        return Patches(self.vol_shape, initialize_by = "data", \
+                       points = self.points.copy()[s_sel,...],\
+                       widths = self.widths.copy()[s_sel,...],\
+                       features = None if self.features is None else self.features.copy()[s_sel,...], \
+                       names = self.feature_names.copy() if any(self.feature_names) else [])
+        
     def pop(self, n_pop):
         
         '''

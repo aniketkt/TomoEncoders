@@ -52,7 +52,7 @@ model_name = "M_a02_64-64-64"
 
 ### VOID ANALYSIS
 N_MAX_DETECT = 25 # 3 for 2 voids - first one is surface
-N_SURFACES = 1
+CIRC_MASK_FRAC = 0.75
 
 ### VISUALIZATION
 from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
@@ -66,7 +66,30 @@ plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
 TIMEIT_lev1 = True
 TIMEIT_lev2 = False
 
+def visualize_vedo(sub_vols, p3d):
+    '''
+    make vol_seg_b.
+    to-do - select a specific void as IDX_VOID_SELECT and show it in different color.
+    '''
 
+    vol_vis = np.zeros(p3d.vol_shape, dtype = np.uint8)
+    p3d.fill_patches_in_volume(sub_vols, vol_vis)    
+
+    surf = vedo.Volume(vol_vis).isosurface(0.5).smooth().subdivide()
+    return surf
+
+def select_voids(sub_vols, p3d, s_sel):
+    
+    s_sel = list(s_sel)
+    if s_sel[0] is None:
+        s_sel[0] = 0
+    if s_sel[1] is None:
+        s_sel[1] = len(p3d)
+    assert len(p3d) == len(sub_vols), "error while selecting voids. the length of patches and sub_vols must match"
+    s_sel = tuple(s_sel)
+    
+    idxs = np.arange(s_sel[0], s_sel[1]).tolist()
+    return [sub_vols[ii] for ii in idxs], p3d.select_by_range(s_sel)
 
 from utils import VoidDetector
 def calc_vol_shape(projs_shape):
@@ -80,8 +103,8 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
 
     PROJS_SHAPE_1 = projs.shape
     VOL_SHAPE_1 = calc_vol_shape(PROJS_SHAPE_1)
-    print("projections shape: ", PROJS_SHAPE_1)
-    print("reconstructed volume shape: ", VOL_SHAPE_1)
+#     print("projections shape: ", PROJS_SHAPE_1)
+#     print("reconstructed volume shape: ", VOL_SHAPE_1)
     vol_rec_b = vs.reconstruct(projs, theta, center)
     vol_seg_b = vs.segment(vol_rec_b, fe)
     
@@ -95,15 +118,15 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
     plt.close()
 
     ##### VOID DETECTION STEP ############
-    sub_vols_voids_b, p3d_voids_b, vol_surf, vol_voids = vs.export_voids(vol_seg_b)
+    sub_vols_voids_b, p3d_voids_b = vs.export_voids(vol_seg_b)
+    sub_vols_voids_b, p3d_voids_b = select_voids(sub_vols_voids_b, p3d_voids_b, (1,None))
     
-#     vol_voids_surf = vedo.Volume(vol_voids + vol_surf)
-    vol_voids_surf = vedo.Volume(vol_voids + 0)
-    surf = vol_voids_surf.isosurface(0.5).smooth().subdivide()
+    surf = visualize_vedo(sub_vols_voids_b, p3d_voids_b)
     print("READY FOR SCENE OF PORE MORPHOLOGY")
     vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
     
-    
+    pdb.set_trace()
+    print("continue into digital zoom or loop over")
     
     if DIGITAL_ZOOM:
         p3d_grid_1_voids = to_regular_grid(sub_vols_voids_b, \
@@ -118,7 +141,7 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
 
         vol_seg_1 = np.ones(VOL_SHAPE_1, dtype = np.uint8)
         vs.segment_patches_to_volume(sub_vols_grid_voids_1, p3d_grid_1_voids, vol_seg_1, fe)
-        print("vol_seg_1 shape: ", vol_seg_1.shape)
+#         print("vol_seg_1 shape: ", vol_seg_1.shape)
 
         fig, ax = plt.subplots(1, 3, figsize = (8,4))
         view_midplanes(vol = vol_seg_1, cmap = 'copper', ax = ax)
@@ -154,6 +177,7 @@ if __name__ == "__main__":
     vol = ds.read_full().astype(np.float32)
     vol = normalize_volume_gpu(vol, normalize_sampling_factor = NORM_SAMPLING_FACTOR, chunk_size = 1)
     
+    
     iter_count = 0
     while True:
         print("\n\n", "#"*55, "\n")
@@ -162,6 +186,7 @@ if __name__ == "__main__":
 
 #         point = (550, 2000, 1800)
         point = (550, 2100, 2100)
+        DIGITAL_ZOOM = False
         print("READY TO NAVIGATE TO NEXT LOCATION")        
         print("CURRENT LOCATION: ", point)
         pdb.set_trace()        
@@ -178,12 +203,12 @@ if __name__ == "__main__":
         
         vs = VoidDetector(THETA_BINNING, DET_BINNING, \
                           INF_INPUT_SIZE, INF_CHUNK_SIZE,\
-                          N_MAX_DETECT, N_SURFACES, \
+                          N_MAX_DETECT, CIRC_MASK_FRAC,\
                           TIMEIT_lev1 = TIMEIT_lev1,\
                           TIMEIT_lev2 = TIMEIT_lev2,\
                           NORM_SAMPLING_FACTOR = NORM_SAMPLING_FACTOR)
         
-        process_data(projs, theta, center, fe, vs)
+        process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = DIGITAL_ZOOM)
         
         iter_count += 1
         

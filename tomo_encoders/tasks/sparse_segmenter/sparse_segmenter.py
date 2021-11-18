@@ -479,7 +479,7 @@ class SparseSegmenter():
         assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
         
         t0 = time.time()
-        print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
+#         print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
         nb = len(x)
         nchunks = int(np.ceil(nb/chunk_size))
         nb_padded = nchunks*chunk_size
