@@ -32,7 +32,7 @@ import h5py
 import pdb
 
 ### DETECTOR / RECONSTRUCTION
-DET_BINNING = 4 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
+DET_BINNING = 2 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
 THETA_BINNING = 4
 DET_NTHETA = 2000
 DET_FOV = (1920,1000)
