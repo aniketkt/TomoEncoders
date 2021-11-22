@@ -10,7 +10,7 @@ import cupy as cp
 import time 
 import h5py 
 from tomo_encoders import DataFile, Patches
-from tomo_encoders.tasks import SparseSegmenter
+from tomo_encoders.neural_nets.sparse_segmenter import SparseSegmenter
 import os 
 import tqdm
 import pandas as pd
@@ -78,7 +78,7 @@ def infer(fe):
     print("EXPERIMENT WITH CHUNK_SIZE = %i\n"%chunk_size)
     for jj in range(num_inits):
         x = np.random.uniform(0, 1, tuple([nb_init] + list(patch_size) + [1])).astype(np.float32)
-        y_pred = fe.predict_patches(x, chunk_size, None, \
+        y_pred = fe.predict_patches("segmenter", x, chunk_size, None, \
                                                 min_max = min_max, \
                                                 TIMEIT = False)
     unit_times = []
@@ -88,7 +88,7 @@ def infer(fe):
     print("#"*55,"\n")
     for jj in range(len(nb)):
         x = np.random.uniform(0, 1, tuple([nb[jj]] + list(patch_size) + [1])).astype(np.float32)
-        y_pred, t_unit = fe.predict_patches(x, chunk_size, None, \
+        y_pred, t_unit = fe.predict_patches("segmenter", x, chunk_size, None, \
                                                 min_max = min_max, \
                                                 TIMEIT = True)
         print("inf. time per voxel %.2f nanoseconds"%(t_unit/(np.prod(patch_size))*1.0e6))
@@ -117,9 +117,7 @@ if __name__ == "__main__":
     print("EXPERIMENT WITH MODEL %s"%model_tag)
     model_params = get_model_params(model_tag)
     fe = SparseSegmenter(model_initialization = 'define-new', \
-                         input_size = patch_size, \
                          descriptor_tag = model_tag,\
-                         gpu_mem_limit = gpu_mem_limit,\
                          **model_params) 
     print("EXPERIMENT WITH INPUT_SIZE = ", patch_size)
 #     fe.print_layers("segmenter")    

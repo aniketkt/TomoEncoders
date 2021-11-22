@@ -11,33 +11,13 @@ import os
 import tensorflow as tf
 import vedo
 
-from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d, recon_binning
-from tomo_encoders.tasks.sparse_segmenter.project import acquire_data
-from tomo_encoders.tasks.sparse_segmenter.sparse_segmenter import modified_autocontrast, normalize_volume_gpu
-from tomo_encoders.tasks.sparse_segmenter.detect_voids import to_regular_grid, export_voids
+
+from tomo_encoders.reconstruction.recon import recon_patches_3d, recon_binning
+from tomo_encoders.labeling.detect_voids import export_voids
+from tomo_encoders.misc.voxel_processing import modified_autocontrast, cylindrical_mask
 from tomo_encoders import Patches
 
-
-def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
-    
-    vol_shape = out_vol.shape
-    assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
-    
-    shape_yx = vol_shape[1]
-    shape_z = vol_shape[0]
-    rad = int(mask_fac*shape_yx/2)
-    
-    pts = np.arange(-int(shape_yx//2), int(np.ceil(shape_yx//2)))
-    yy, xx = np.meshgrid(pts, pts, indexing = 'ij')
-    circ = (np.sqrt(yy**2 + xx**2) < rad).astype(np.uint8) # inside is positive
-    circ = circ[np.newaxis, ...]
-    cyl = np.repeat(circ, shape_z, axis = 0)
-    
-    out_vol[cyl == 0] = 0
-    
-    return
-
-class VoidDetector():
+class VoidMetrology():
     '''
     '''
     def __init__(self, THETA_BINNING, DET_BINNING, \
@@ -98,8 +78,6 @@ class VoidDetector():
         return sub_vols_grid
     
     
-    
-    
     def segment_patches_to_volume(self, sub_vols_grid, p3d_grid_voids, out_vol, fe):
         '''
         Segment reconstructed patches at full resolution.
@@ -110,7 +88,7 @@ class VoidDetector():
         max_val = sub_vols_grid[:,::self.NORM_SAMPLING_FACTOR].max()
         min_max = (min_val, max_val)
 
-        sub_vols_y_pred = fe.predict_patches(sub_vols_grid[...,np.newaxis], \
+        sub_vols_y_pred = fe.predict_patches("segmenter", sub_vols_grid[...,np.newaxis], \
                                                self.INF_CHUNK_SIZE, None, \
                                                min_max = min_max, \
                                                TIMEIT = self.TIMEIT_lev2)
@@ -122,8 +100,6 @@ class VoidDetector():
         p3d_grid_voids.fill_patches_in_volume(sub_vols_y_pred, out_vol, TIMEIT = self.TIMEIT_lev2)
         return
     
-    
-    
     def segment(self, vol_rec_b, fe):
     
         # SEGMENTATION OF BINNED RECONSTRUCTION
@@ -132,7 +108,7 @@ class VoidDetector():
                              patch_size = self.INF_INPUT_SIZE)
         sub_vols_x_b = p3d_grid_b.extract(vol_rec_b, self.INF_INPUT_SIZE)
         min_max = fe.calc_voxel_min_max(vol_rec_b, self.NORM_SAMPLING_FACTOR, TIMEIT = False)
-        sub_vols_y_pred_b = fe.predict_patches(sub_vols_x_b[...,np.newaxis], \
+        sub_vols_y_pred_b = fe.predict_patches("segmenter", sub_vols_x_b[...,np.newaxis], \
                                                self.INF_CHUNK_SIZE, None, \
                                                min_max = min_max, \
                                                TIMEIT = self.TIMEIT_lev2)
@@ -141,6 +117,7 @@ class VoidDetector():
             
         sub_vols_y_pred_b = sub_vols_y_pred_b[...,0]
         vol_seg_b = np.zeros(vol_rec_b.shape, dtype = np.uint8)
+        
         p3d_grid_b.fill_patches_in_volume(sub_vols_y_pred_b, \
                                           vol_seg_b, TIMEIT = False)
         assert vol_seg_b.dtype == np.uint8, "data type check failed for vol_seg_b"

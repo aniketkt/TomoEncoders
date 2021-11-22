@@ -7,7 +7,7 @@
 model_path = '/data02/MyArchive/aisteer_3Dencoders/models/AM_part_segmenter'
 gpu_mem_limit = 48.0
 
-
+TEMP_MAX_STRIDE = 8 # 8
 
 
 
@@ -20,7 +20,7 @@ def get_training_params(TRAINING_INPUT_SIZE):
                        "n_epochs" : 30,\
                        "random_rotate" : True, \
                        "add_noise" : 0.05, \
-                       "max_stride" : 8, \
+                       "max_stride" : TEMP_MAX_STRIDE, \
                        "cutoff" : 0.3, \
                        "normalize_sampling_factor": 4}
     
@@ -58,8 +58,7 @@ def get_model_params(model_tag):
          "activation" : 'lrelu', \
          "batch_norm" : True, \
          "isconcat" : [True, True, True], \
-         "pool_size" : [2,2,2], \
-         "stdinput" : False}
+         "pool_size" : [2,2,2]}
     
     # default
     model_params = m.copy()

@@ -10,9 +10,10 @@ import sys
 from tomo_encoders import Patches, DataFile
 import tensorflow as tf
 import time
-from tomo_encoders.tasks import SparseSegmenter, load_dataset_pairs
-from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes
 
+from tomo_encoders.neural_nets.sparse_segmenter import SparseSegmenter
+from tomo_encoders.rw_utils.data_pairs import load_dataset_pairs
+from tomo_encoders.misc.feature_maps_vis import view_midplanes
 
 ######## START GPU SETTINGS ############
 ########## SET MEMORY GROWTH to True ############
@@ -29,8 +30,7 @@ from datasets import get_datasets, dataset_names
 
 # INPUT SIZE CHANGE
 from params import *
-# model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03", "M_a01"]
-model_tags = ["M_a02"]
+model_tags = ["M_a02", "M_a04", "M_a05", "M_a01", "M_a03", "M_a06"]
 test_binning = 1
 TRAINING_INPUT_SIZE = (64,64,64)
 
@@ -56,7 +56,7 @@ def infer(fe, Xs, Ys):
 if __name__ == "__main__":
 
     
-    datasets = get_datasets(dataset_names[:], test_binning = test_binning)
+    datasets = get_datasets(dataset_names[1:], test_binning = test_binning)
     print(datasets.keys())
     Xs, Ys = load_dataset_pairs(datasets)
     
@@ -66,7 +66,6 @@ if __name__ == "__main__":
         print("#"*55, "\nWorking on model %s\n"%model_tag, "#"*55)
         model_params = get_model_params(model_tag)
         fe = SparseSegmenter(model_initialization = 'define-new', \
-                                 input_size = training_params["training_input_size"], \
                                  descriptor_tag = model_tag, \
                                  **model_params)
         

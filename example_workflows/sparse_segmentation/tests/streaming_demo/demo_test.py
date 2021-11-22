@@ -26,25 +26,24 @@ except:
 ### READING DATA
 PROJS_PATH = '/data02/MyArchive/AM_part_Xuan/projs' 
 read_fpath = '/data02/MyArchive/AM_part_Xuan/data/mli_L206_HT_650_L3_rec_1x1_uint16.hdf5' 
-from tomo_encoders.tasks.segmenter import normalize_volume_gpu
+from tomo_encoders.misc.voxel_processing import normalize_volume_gpu
 from tomo_encoders import DataFile, Patches
 import h5py 
 import pdb
 
 ### DETECTOR / RECONSTRUCTION
-DET_BINNING = 2 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
+DET_BINNING = 4 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
 THETA_BINNING = 4
 DET_NTHETA = 2000
 DET_FOV = (1920,1000)
 DET_PNZ = 4 # may speed up projection compututation (or simulation of acquisition)
-from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d
-from tomo_encoders.tasks.sparse_segmenter.project import acquire_data, read_data
-from tomo_encoders.tasks.sparse_segmenter.detect_voids import to_regular_grid
+from tomo_encoders.reconstruction.project import acquire_data, read_data
+from tomo_encoders.labeling.detect_voids import to_regular_grid
 
 ### SEGMENTATION
 sys.path.append('../trainer')
 from params import *
-from tomo_encoders.tasks import SparseSegmenter
+from tomo_encoders.neural_nets.sparse_segmenter import SparseSegmenter
 INF_INPUT_SIZE = (64,64,64)
 INF_CHUNK_SIZE = 32 # full volume
 NORM_SAMPLING_FACTOR = 4
@@ -55,11 +54,11 @@ N_MAX_DETECT = 25 # 3 for 2 voids - first one is surface
 CIRC_MASK_FRAC = 0.75
 
 ### VISUALIZATION
-from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
+from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
-#import matplotlib as mpl
-#mpl.use('Agg')
+import matplotlib as mpl
+mpl.use('Agg')
 
 
 ### TIMING
@@ -91,7 +90,7 @@ def select_voids(sub_vols, p3d, s_sel):
     idxs = np.arange(s_sel[0], s_sel[1]).tolist()
     return [sub_vols[ii] for ii in idxs], p3d.select_by_range(s_sel)
 
-from utils import VoidDetector
+from utils import VoidMetrology
 def calc_vol_shape(projs_shape):
     ntheta, nz, nx = projs_shape
     return (nz, nx, nx)
@@ -103,8 +102,8 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
 
     PROJS_SHAPE_1 = projs.shape
     VOL_SHAPE_1 = calc_vol_shape(PROJS_SHAPE_1)
-#     print("projections shape: ", PROJS_SHAPE_1)
-#     print("reconstructed volume shape: ", VOL_SHAPE_1)
+    print("projections shape: ", PROJS_SHAPE_1)
+    print("reconstructed volume shape: ", VOL_SHAPE_1)
     vol_rec_b = vs.reconstruct(projs, theta, center)
     vol_seg_b = vs.segment(vol_rec_b, fe)
     
@@ -114,7 +113,6 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
                                          np.max(vol_rec_b)), ax = ax)
     view_midplanes(vol = vol_seg_b, cmap = 'copper', alpha = 0.3, ax = ax)
     plt.savefig(os.path.join(plot_out_path, "vols_b_%s.png"%model_name))
-    plt.show()
     plt.close()
 
     ##### VOID DETECTION STEP ############
@@ -123,10 +121,6 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
     
     surf = visualize_vedo(sub_vols_voids_b, p3d_voids_b)
     print("READY FOR SCENE OF PORE MORPHOLOGY")
-    vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
-    
-    pdb.set_trace()
-    print("continue into digital zoom or loop over")
     
     if DIGITAL_ZOOM:
         p3d_grid_1_voids = to_regular_grid(sub_vols_voids_b, \
@@ -141,22 +135,14 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
 
         vol_seg_1 = np.ones(VOL_SHAPE_1, dtype = np.uint8)
         vs.segment_patches_to_volume(sub_vols_grid_voids_1, p3d_grid_1_voids, vol_seg_1, fe)
-#         print("vol_seg_1 shape: ", vol_seg_1.shape)
+        print("vol_seg_1 shape: ", vol_seg_1.shape)
 
         fig, ax = plt.subplots(1, 3, figsize = (8,4))
         view_midplanes(vol = vol_seg_1, cmap = 'copper', ax = ax)
         plt.savefig(os.path.join(plot_out_path, "vols_1_%s.png"%model_name))
         print("TOTAL TIME ELAPSED: %.2f seconds"%(time.time() - t000))
-        plt.show()
         plt.close()
 
-    #     vol_voids_zoom = vedo.Volume(vol_seg_1)
-    #     surf = vol_voids_zoom.isosurface(0.5).smooth().subdivide()
-    #     print("READY FOR DIGITAL ZOOM")
-    #     import pdb; pdb.set_trace()
-    #     vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
-    
-    
     return
 
 
@@ -188,7 +174,6 @@ if __name__ == "__main__":
         DIGITAL_ZOOM = False
         print("READY TO NAVIGATE TO NEXT LOCATION")        
         print("CURRENT LOCATION: ", point)
-        pdb.set_trace()        
         # Read if already written
         projs, theta, center = read_data(PROJS_PATH, \
                                          point, \
@@ -200,7 +185,7 @@ if __name__ == "__main__":
                                                 FOV = DET_FOV, \
                                                 pnz = DET_PNZ)    
         
-        vs = VoidDetector(THETA_BINNING, DET_BINNING, \
+        vs = VoidMetrology(THETA_BINNING, DET_BINNING, \
                           INF_INPUT_SIZE, INF_CHUNK_SIZE,\
                           N_MAX_DETECT, CIRC_MASK_FRAC,\
                           TIMEIT_lev1 = TIMEIT_lev1,\
