@@ -2,7 +2,7 @@
 data
 log_seg
 plots
-
+*screenlog*
 
 # packages
 *.7z
