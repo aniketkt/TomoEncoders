@@ -13,7 +13,7 @@ setup(
     author='Aniket Tekawade',
     author_email='atekawade@anl.gov',
     # Needed to actually package something
-    packages= ['tomo_encoders', 'tomo_encoders.neural_nets', 'tomo_encoders.misc_utils', 'tomo_encoders.structures', 'tomo_encoders.tasks'],
+    packages= ['tomo_encoders', 'tomo_encoders.neural_nets', 'tomo_encoders.misc', 'tomo_encoders.structures', 'tomo_encoders.tasks', 'tomo_encoders.rw_utils', 'tomo_encoders.reconstruction', 'tomo_encoders.labeling'],
     # Needed for dependencies
     install_requires=['numpy', 'pandas', 'scipy', 'h5py', 'matplotlib', \
                       'opencv-python', 'scikit-image',\

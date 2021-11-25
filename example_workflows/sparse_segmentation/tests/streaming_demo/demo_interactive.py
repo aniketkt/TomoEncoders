@@ -26,25 +26,26 @@ except:
 ### READING DATA
 PROJS_PATH = '/data02/MyArchive/AM_part_Xuan/projs' 
 read_fpath = '/data02/MyArchive/AM_part_Xuan/data/mli_L206_HT_650_L3_rec_1x1_uint16.hdf5' 
-from tomo_encoders.tasks.segmenter import normalize_volume_gpu
+from tomo_encoders.misc.voxel_processing import normalize_volume_gpu
 from tomo_encoders import DataFile, Patches
 import h5py 
 import pdb
 
 ### DETECTOR / RECONSTRUCTION
-DET_BINNING = 2 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
+DET_BINNING = 4 # detector binning # ONLY VALUES THAT DIVIDE 64 into whole parts.
 THETA_BINNING = 4
 DET_NTHETA = 2000
 DET_FOV = (1920,1000)
 DET_PNZ = 4 # may speed up projection compututation (or simulation of acquisition)
-from tomo_encoders.tasks.sparse_segmenter.recon import recon_patches_3d
-from tomo_encoders.tasks.sparse_segmenter.project import acquire_data, read_data
-from tomo_encoders.tasks.sparse_segmenter.detect_voids import to_regular_grid
+
+
+from tomo_encoders.reconstruction.project import acquire_data, read_data
+from tomo_encoders.labeling.detect_voids import to_regular_grid
 
 ### SEGMENTATION
 sys.path.append('../trainer')
 from params import *
-from tomo_encoders.tasks import SparseSegmenter
+from tomo_encoders.neural_nets.sparse_segmenter import SparseSegmenter
 INF_INPUT_SIZE = (64,64,64)
 INF_CHUNK_SIZE = 32 # full volume
 NORM_SAMPLING_FACTOR = 4
@@ -55,7 +56,7 @@ N_MAX_DETECT = 25 # 3 for 2 voids - first one is surface
 CIRC_MASK_FRAC = 0.75
 
 ### VISUALIZATION
-from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
+from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
 #import matplotlib as mpl
@@ -91,7 +92,7 @@ def select_voids(sub_vols, p3d, s_sel):
     idxs = np.arange(s_sel[0], s_sel[1]).tolist()
     return [sub_vols[ii] for ii in idxs], p3d.select_by_range(s_sel)
 
-from utils import VoidDetector
+from utils import VoidMetrology
 def calc_vol_shape(projs_shape):
     ntheta, nz, nx = projs_shape
     return (nz, nx, nx)
@@ -200,7 +201,7 @@ if __name__ == "__main__":
                                                 FOV = DET_FOV, \
                                                 pnz = DET_PNZ)    
         
-        vs = VoidDetector(THETA_BINNING, DET_BINNING, \
+        vs = VoidMetrology(THETA_BINNING, DET_BINNING, \
                           INF_INPUT_SIZE, INF_CHUNK_SIZE,\
                           N_MAX_DETECT, CIRC_MASK_FRAC,\
                           TIMEIT_lev1 = TIMEIT_lev1,\

@@ -99,8 +99,8 @@ class SparseSegmenter(Segmenter_fCNN):
         '''
         self.models = {} # clears any existing models linked to this class!!!!
         for model_key, model_name in model_names.items():
-            self.models.update({model_key : load_model(os.path.join(model_path, model_name + '.hdf5'), \
-                                                      custom_objects = custom_objects_dict)})
+            self.models.update({model_key : load_model(os.path.join(model_path, model_name + '.hdf5'))})
+#                                                       custom_objects = custom_objects_dict)})
             
         self.model_tag = "_".join(model_names["segmenter"].split("_")[1:])
         return
@@ -108,7 +108,7 @@ class SparseSegmenter(Segmenter_fCNN):
     def save_models(self, model_path):
 
         model = self.models["segmenter"]
-        filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag))
+        filepath = os.path.join(model_path, "%s_%s.hdf5"%("segmenter", self.model_tag))
         tf.keras.models.save_model(model, filepath, include_optimizer=False)        
         return
     
