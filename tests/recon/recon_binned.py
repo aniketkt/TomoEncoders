@@ -5,7 +5,7 @@
 import sys 
 import matplotlib.pyplot as plt 
 import numpy as np 
-from tomo_encoders.misc_utils.feature_maps_vis import view_midplanes 
+from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 import cupy as cp 
 import time 
 import h5py 
@@ -18,7 +18,7 @@ mpl.use("Agg")
 read_fpath = '/data02/MyArchive/AM_part_Xuan/projs/mli_L206_HT_650_L3_projs_bin1_ntheta3000.hdf5'
 save_image_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/binned_recon'
 model_size = (64,64,64)
-from tomo_encoders.tasks.sparse_segmenter.recon import recon_binning
+from tomo_encoders.reconstruction.recon import recon_binning
 
 theta_binning = 6
 z_binning = 4

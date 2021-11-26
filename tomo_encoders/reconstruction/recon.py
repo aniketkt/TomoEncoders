@@ -133,6 +133,8 @@ def fbp_filter(data, TIMEIT = False):
     
     return data
 
+
+
 def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, apply_fbp = True, TIMEIT = False):
     
     '''
