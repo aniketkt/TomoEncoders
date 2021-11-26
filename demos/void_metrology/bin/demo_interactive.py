@@ -20,6 +20,7 @@ except:
     # Invalid device or cannot modify virtual devices once initialized.
     pass        
 ######### END GPU SETTINGS ############
+HEADLESS = True
 
 # /data02/MyArchive/aisteer_3Dencoders/TomoEncoders/example_workflows/sparse_segmentation/tests/streaming_demo
 
@@ -59,8 +60,10 @@ CIRC_MASK_FRAC = 0.75
 from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'
-#import matplotlib as mpl
-#mpl.use('Agg')
+
+if HEADLESS:
+    import matplotlib as mpl
+    mpl.use('Agg')
 
 
 ### TIMING
@@ -92,7 +95,7 @@ def select_voids(sub_vols, p3d, s_sel):
     idxs = np.arange(s_sel[0], s_sel[1]).tolist()
     return [sub_vols[ii] for ii in idxs], p3d.select_by_range(s_sel)
 
-from utils import VoidMetrology
+from tomo_encoders.tasks import VoidMetrology
 def calc_vol_shape(projs_shape):
     ntheta, nz, nx = projs_shape
     return (nz, nx, nx)
@@ -115,19 +118,20 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
                                          np.max(vol_rec_b)), ax = ax)
     view_midplanes(vol = vol_seg_b, cmap = 'copper', alpha = 0.3, ax = ax)
     plt.savefig(os.path.join(plot_out_path, "vols_b_%s.png"%model_name))
-    plt.show()
+    if not HEADLESS:
+        plt.show()
     plt.close()
 
     ##### VOID DETECTION STEP ############
     sub_vols_voids_b, p3d_voids_b = vs.export_voids(vol_seg_b)
     sub_vols_voids_b, p3d_voids_b = select_voids(sub_vols_voids_b, p3d_voids_b, (1,None))
     
-    surf = visualize_vedo(sub_vols_voids_b, p3d_voids_b)
-    print("READY FOR SCENE OF PORE MORPHOLOGY")
-    vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
-    
-    pdb.set_trace()
-    print("continue into digital zoom or loop over")
+    if not HEADLESS:
+        surf = visualize_vedo(sub_vols_voids_b, p3d_voids_b)
+        print("READY FOR SCENE OF PORE MORPHOLOGY")
+        vedo.show(surf, bg = 'wheat', bg2 = 'lightblue')
+        pdb.set_trace()
+        print("continue into digital zoom or loop over")
     
     if DIGITAL_ZOOM:
         p3d_grid_1_voids = to_regular_grid(sub_vols_voids_b, \
@@ -148,7 +152,8 @@ def process_data(projs, theta, center, fe, vs, DIGITAL_ZOOM = False):
         view_midplanes(vol = vol_seg_1, cmap = 'copper', ax = ax)
         plt.savefig(os.path.join(plot_out_path, "vols_1_%s.png"%model_name))
         print("TOTAL TIME ELAPSED: %.2f seconds"%(time.time() - t000))
-        plt.show()
+        if not HEADLESS:
+            plt.show()
         plt.close()
 
     #     vol_voids_zoom = vedo.Volume(vol_seg_1)
@@ -173,23 +178,26 @@ if __name__ == "__main__":
                          model_path = model_path)    
     fe.test_speeds(INF_CHUNK_SIZE)
     
-    ds = DataFile(read_fpath, data_tag = 'data', tiff = False, VERBOSITY = 0)
-    vol = ds.read_full().astype(np.float32)
-    vol = normalize_volume_gpu(vol, normalize_sampling_factor = NORM_SAMPLING_FACTOR, chunk_size = 1)
-    
+    if not HEADLESS:
+        ds = DataFile(read_fpath, data_tag = 'data', tiff = False, VERBOSITY = 0)
+        vol = ds.read_full().astype(np.float32)
+        vol = normalize_volume_gpu(vol, normalize_sampling_factor = NORM_SAMPLING_FACTOR, chunk_size = 1)
     
     iter_count = 0
     while True:
         print("\n\n", "#"*55, "\n")
-        print("ITERATION %i: \n"%iter_count, vol.shape)
-        print("\nDOMAIN SHAPE: ", vol.shape)
+        print("ITERATION %i: \n"%iter_count)
+#         print("\nDOMAIN SHAPE: ", vol.shape)
 
 #         point = (550, 2000, 1800)
-        point = (550, 2100, 2100)
+        
         DIGITAL_ZOOM = False
         print("READY TO NAVIGATE TO NEXT LOCATION")        
-        print("CURRENT LOCATION: ", point)
-        pdb.set_trace()        
+        point = (550, 2100, 2100)
+        time.sleep(3.0)
+        print("DONE: Scan acquired at location: ", point)
+        if not HEADLESS:
+            pdb.set_trace()        
         # Read if already written
         projs, theta, center = read_data(PROJS_PATH, \
                                          point, \

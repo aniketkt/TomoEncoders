@@ -50,7 +50,7 @@ class GenericKerasProcessor():
 
         '''
 
-        # could be "data" or "label" or "embedding"
+        # could be "data" or "labels" or "embeddings"
         self.input_type = "data"
         self.output_type = "data"
         
@@ -78,6 +78,95 @@ class GenericKerasProcessor():
             txt_out.append(lshape + "    ::    "  + lname)
         print('\n'.join(txt_out))
         return
+    
+    def predict_patches(self, model_key, x, chunk_size, out_arr, \
+                         min_max = None, \
+                         TIMEIT = False):
+
+        '''
+        Predicts sub_vols. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
+        
+        '''
+        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
+        
+        
+        t0 = time.time()
+#         print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
+        nb = len(x)
+        nchunks = int(np.ceil(nb/chunk_size))
+        nb_padded = nchunks*chunk_size
+        padding = nb_padded - nb
+
+        if out_arr is None:
+            out_arr = np.empty_like(x) # use numpy since return from predict is numpy
+        else:
+            # to-do: check dims
+            assert out_arr.shape == x.shape, "x and out_arr shapes must be equal and 4-dimensional (batch_size, nz, ny, nx, 1)"
+
+        for k in range(nchunks):
+
+            sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
+            x_in = x[sb,...]
+
+            if min_max is not None:
+                min_val, max_val = min_max
+                x_in = _rescale_data(x_in, float(min_val), float(max_val))
+            
+            if padding != 0:
+                if k == nchunks - 1:
+                    x_in = np.pad(x_in, \
+                                  ((0,padding), (0,0), \
+                                   (0,0), (0,0), (0,0)), mode = 'edge')
+                
+                if model_key == "autoencoder":
+                    z = self.models["encoder"].predict(x_in)
+                    x_out = self.models["decoder"].predict(z)
+                else:
+                    x_out = self.models[model_key].predict(x_in)
+
+                if k == nchunks -1:
+                    x_out = x_out[:-padding,...]
+            else:
+                if self.output_type == "autoencoder":
+                    z = self.models["encoder"].predict(x_in)
+                    x_out = self.models["decoder"].predict(z)
+                else:
+                    x_out = self.models[model_key].predict(x_in)
+            out_arr[sb,...] = x_out
+        
+        if self.output_type == "labels":
+            out_arr = np.round(out_arr).astype(np.uint8)
+        elif self.output_type == "embeddings":
+            out_arr = np.round(out_arr).astype(x.dtype)
+            
+        t_unit = (time.time() - t0)*1000.0/nb
+        
+        if TIMEIT:
+            print("inf. time p. input patch size %s = %.2f ms, nb = %i"%(str(x[0,...,0].shape), t_unit, nb))
+            print("\n")
+            return out_arr, t_unit
+        else:
+            return out_arr
+    
+    def calc_voxel_min_max(self, vol, sampling_factor, TIMEIT = False):
+
+        '''
+        returns min and max values for a big volume sampled at some factor
+        '''
+
+        return _find_min_max(vol, sampling_factor, TIMEIT = TIMEIT)
+    
+    
+    def rescale_data(self, data, min_val, max_val):
+        '''
+        Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
+
+        '''
+        xp = cp.get_array_module(data)  # 'xp' is a standard usage in the community
+        eps = 1e-12
+        data = (data - min_val) / (max_val - min_val + eps)
+        return data
+    
     
     @abstractmethod
     def test_speeds(self):
@@ -244,27 +333,6 @@ class EmbeddingLearner(GenericKerasProcessor):
         else:
             return out_arr
     
-    def calc_voxel_min_max(self, vol, sampling_factor, TIMEIT = False):
-
-        '''
-        returns min and max values for a big volume sampled at some factor
-        '''
-
-        return _find_min_max(vol, sampling_factor, TIMEIT = TIMEIT)
-    
-    
-    def rescale_data(self, data, min_val, max_val):
-        '''
-        Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
-
-        '''
-        xp = cp.get_array_module(data)  # 'xp' is a standard usage in the community
-        eps = 1e-12
-        data = (data - min_val) / (max_val - min_val + eps)
-        return data
-    
-    
-    
 class Vox2VoxProcessor_fCNN(GenericKerasProcessor):
     
     def __init__(self,**kwargs):
@@ -310,89 +378,6 @@ class Vox2VoxProcessor_fCNN(GenericKerasProcessor):
             x[x == 0] = 1.0e-12
             y[y == 0] = 1.0e-12
             yield x, y
-    
-    def predict_patches(self, model_key, x, chunk_size, out_arr, \
-                         min_max = None, \
-                         TIMEIT = False):
-
-        '''
-        Predicts sub_vols. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
-        
-        '''
-        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
-        
-        
-        t0 = time.time()
-#         print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
-        nb = len(x)
-        nchunks = int(np.ceil(nb/chunk_size))
-        nb_padded = nchunks*chunk_size
-        padding = nb_padded - nb
-
-        if out_arr is None:
-            out_arr = np.empty_like(x) # use numpy since return from predict is numpy
-        else:
-            # to-do: check dims
-            assert out_arr.shape == x.shape, "x and out_arr shapes must be equal and 4-dimensional (batch_size, nz, ny, nx, 1)"
-
-        for k in range(nchunks):
-
-            sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
-            x_in = x[sb,...]
-
-            if min_max is not None:
-                min_val, max_val = min_max
-                x_in = _rescale_data(x_in, float(min_val), float(max_val))
-            
-            if padding != 0:
-                if k == nchunks - 1:
-                    x_in = np.pad(x_in, \
-                                  ((0,padding), (0,0), \
-                                   (0,0), (0,0), (0,0)), mode = 'edge')
-                x_out = self.models[model_key].predict(x_in)
-
-                if k == nchunks -1:
-                    x_out = x_out[:-padding,...]
-            else:
-                x_out = self.models[model_key].predict(x_in)
-            out_arr[sb,...] = x_out
-        
-        
-        
-        if self.output_type == "labels":
-            out_arr = np.round(out_arr).astype(np.uint8)
-            
-            
-        t_unit = (time.time() - t0)*1000.0/nb
-        
-        if TIMEIT:
-            print("inf. time p. input patch size %s = %.2f ms, nb = %i"%(str(x[0,...,0].shape), t_unit, nb))
-            print("\n")
-            return out_arr, t_unit
-        else:
-            return out_arr
-    
-    def calc_voxel_min_max(self, vol, sampling_factor, TIMEIT = False):
-
-        '''
-        returns min and max values for a big volume sampled at some factor
-        '''
-
-        return _find_min_max(vol, sampling_factor, TIMEIT = TIMEIT)
-    
-    
-    def rescale_data(self, data, min_val, max_val):
-        '''
-        Recales data to values into range [min_val, max_val]. Data can be any numpy or cupy array of any shape.  
-
-        '''
-        xp = cp.get_array_module(data)  # 'xp' is a standard usage in the community
-        eps = 1e-12
-        data = (data - min_val) / (max_val - min_val + eps)
-        return data
-    
-
-    
 
 if __name__ == "__main__":
     
