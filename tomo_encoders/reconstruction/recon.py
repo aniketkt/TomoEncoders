@@ -16,9 +16,11 @@ from tomo_encoders import Patches
 
 def darkflat_correction(data, dark, flat):
     """Dark-flat field correction"""
+    xp = cp.get_array_module(data)
     for k in range(data.shape[0]):
-        data[k] = (data[k]-dark)/cp.maximum(flat-dark, 1e-6)
+        data[k] = (data[k]-dark)/xp.maximum(flat-dark, 1e-6)
     return data
+
 def minus_log(data):
     """Taking negative logarithm"""
     data = -cp.log(cp.maximum(data, 1e-6))

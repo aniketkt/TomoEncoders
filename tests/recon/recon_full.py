@@ -36,7 +36,7 @@ if __name__ == "__main__":
     
     with cp.cuda.Device(0):
         center = projs.shape[-1]//2.0
-        vol = solver(projs, theta, center, flat, dark, TIMEIT = True)
+        vol = solver(projs, theta, center, dark, flat, TIMEIT = True)
         cp.cuda.Device(0).synchronize()
     
     

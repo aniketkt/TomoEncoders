@@ -75,7 +75,7 @@ def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
     circ = circ[np.newaxis, ...]
     cyl = np.repeat(circ, shape_z, axis = 0)
     
-    out_vol[cyl == 0] = 0
+    out_vol[cyl == 0] = mask_val
     
     return
 

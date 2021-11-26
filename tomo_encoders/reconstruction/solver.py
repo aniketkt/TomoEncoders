@@ -14,15 +14,17 @@ import h5py
 from cupy.fft import rfft, irfft, rfftfreq
 from tomo_encoders import Patches
 from tomo_encoders.reconstruction.recon import *
-from tomo_encoders.misc.voxel_processing import modified_autocontrast
+from tomo_encoders.misc.voxel_processing import modified_autocontrast, cylindrical_mask
 
-def solver(projs, theta, center, flat, dark, \
-                 apply_fbp = True, \
-                 apply_darkflat_correction = True, \
-                 apply_minus_log = True,\
-                 normalize_sampling_factor = 2,\
-                 apply_contrast_adjust = False,\
-                 TIMEIT = False):
+def solver(projs, theta, center, dark, flat, \
+           apply_fbp = True, \
+           apply_darkflat_correction = True, \
+           apply_minus_log = True,\
+           normalize_sampling_factor = 2,\
+           contrast_adjust_factor = 0.0, \
+           mask_ratio = 0.95, \
+           TIMEIT = False, \
+           PLOTIT = False):
     
     '''
     reconstruct on epics pv stream. assumed data is on cpu in numpy arrays.  
@@ -52,7 +54,7 @@ def solver(projs, theta, center, flat, dark, \
     
     stream_copy = cp.cuda.Stream()
     with stream_copy:
-        data = cp.array(projs)
+        data = cp.array(projs, dtype = 'float32')
         vol_shape = (data.shape[1], data.shape[2], data.shape[2])
         theta = cp.array(theta, dtype = 'float32')
         center = cp.float32(center)
@@ -92,18 +94,30 @@ def solver(projs, theta, center, flat, dark, \
     
     vol_rec = obj.get()
     
-    if apply_contrast_adjust:
-        clip_vals = modified_autocontrast(vol_rec, s = 0.05, \
+    if contrast_adjust_factor > 0.0:
+        clip_vals = modified_autocontrast(vol_rec, \
+                                          s = contrast_adjust_factor, \
                                           normalize_sampling_factor = normalize_sampling_factor)
         vol_rec = np.clip(vol_rec, *clip_vals)
+
+    if mask_ratio < 1.0:
+        s_ = slice(None,None,normalize_sampling_factor)
+        cylindrical_mask(vol_rec, mask_ratio, mask_val = np.min(vol_rec[s_,s_,s_]))
         
     end_gpu.record()
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
     if TIMEIT:
-        print("TIME binned reconstruction: %.2f ms"%t_gpu)
-    
+        print("TIME reconstruction: %.2f ms"%t_gpu)
+    if PLOTIT:
+        fig, ax = plt.subplots(1,3, figsize = (14,6))
+        ax[0].imshow(vol_rec[int(vol_rec.shape[0]*0.2)], cmap = 'gray')
+        ax[1].imshow(vol_rec[int(vol_rec.shape[0]*0.5)], cmap = 'gray')
+        ax[2].imshow(vol_rec[int(vol_rec.shape[0]*0.8)], cmap = 'gray')            
+        plt.show()
+        plt.close()
+        
     return vol_rec
 
 if __name__ == "__main__":
