@@ -44,6 +44,7 @@ def solver(projs, theta, center, dark, flat, \
         vol, reconstructed object in a 3-d numpy voxel array (nz, ny, nx)  
         
     '''
+    
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
@@ -92,7 +93,15 @@ def solver(projs, theta, center, dark, flat, \
     device.synchronize()
 #     print('total bytes: ', memory_pool.total_bytes())    
     
+    end_gpu.record()
+    end_gpu.synchronize()
+    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
+    
+    if TIMEIT:
+        print("TIME reconstruction: %.2f ms"%t_gpu)
+    
     vol_rec = obj.get()
+    del obj
     
     if contrast_adjust_factor > 0.0:
         clip_vals = modified_autocontrast(vol_rec, \
@@ -104,12 +113,6 @@ def solver(projs, theta, center, dark, flat, \
         s_ = slice(None,None,normalize_sampling_factor)
         cylindrical_mask(vol_rec, mask_ratio, mask_val = np.min(vol_rec[s_,s_,s_]))
         
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        print("TIME reconstruction: %.2f ms"%t_gpu)
     if PLOTIT:
         fig, ax = plt.subplots(1,3, figsize = (14,6))
         ax[0].imshow(vol_rec[int(vol_rec.shape[0]*0.2)], cmap = 'gray')

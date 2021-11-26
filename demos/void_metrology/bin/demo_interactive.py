@@ -20,9 +20,6 @@ except:
     # Invalid device or cannot modify virtual devices once initialized.
     pass        
 ######### END GPU SETTINGS ############
-HEADLESS = True
-
-# /data02/MyArchive/aisteer_3Dencoders/TomoEncoders/example_workflows/sparse_segmentation/tests/streaming_demo
 
 ### READING DATA
 PROJS_PATH = '/data02/MyArchive/AM_part_Xuan/projs' 
@@ -57,6 +54,8 @@ N_MAX_DETECT = 25 # 3 for 2 voids - first one is surface
 CIRC_MASK_FRAC = 0.75
 
 ### VISUALIZATION
+HEADLESS = True
+
 from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'
 plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/'

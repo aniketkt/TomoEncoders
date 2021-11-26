@@ -17,26 +17,20 @@ from scipy.ndimage.filters import median_filter
 
 from multiprocessing import Pool, cpu_count
 import functools
-
 import numpy as np
 import h5py
 import abc
-
-
-
 from tomo_encoders.reconstruction.recon import darkflat_correction
 from tomo_encoders.reconstruction.solver import solver
-EXPOSURE_TIME_PER_PROJ = 0.010 # seconds
-NTHETA_180 = 361 # these many projections per 180 degree spin
 
 
-class AnyDataGetter(metaclass = abc.ABCMeta):
+class AnyProjectionStream(metaclass = abc.ABCMeta):
     @abc.abstractmethod
     def reconstruct_window(self):
         pass
     
-class DataGetter(AnyDataGetter):
-    def __init__(self, fname, fname_flat, fname_dark):
+class SomeProjectionStream(AnyProjectionStream):
+    def __init__(self, fname, fname_flat, fname_dark, NTHETA_180, EXPOSURE_TIME_PER_PROJ):
         '''
         Read, reconstruct and segment data from a 4D dataset.  
         
@@ -53,6 +47,8 @@ class DataGetter(AnyDataGetter):
         self.fname = fname
         self.fname_flat = fname_flat
         self.fname_dark = fname_dark
+        self.NTHETA_180 = NTHETA_180
+        self.EXPOSURE_TIME_PER_PROJ = EXPOSURE_TIME_PER_PROJ
     
         self._read_flat_field()
         self._read_proj_stats()
@@ -63,7 +59,7 @@ class DataGetter(AnyDataGetter):
         with h5py.File(self.fname, 'r') as hf:        
             self.total_projs, self.nrows, self.ncols = hf['exchange/data'].shape
             self.theta_all = np.radians(np.asarray(hf['exchange/theta'][:]))
-            self.time_exposed_all = np.arange(self.total_projs)*EXPOSURE_TIME_PER_PROJ
+            self.time_exposed_all = np.arange(self.total_projs)*self.EXPOSURE_TIME_PER_PROJ
         
         # find center
         self.center = 471.0
@@ -77,7 +73,7 @@ class DataGetter(AnyDataGetter):
         return
         
     def _get_projections_180deg(self, istart, vert_slice = None):
-        s = slice(istart, istart + NTHETA_180)
+        s = slice(istart, istart + self.NTHETA_180)
         if vert_slice is None:
             vert_slice = slice(None,None,None)
         
@@ -85,7 +81,7 @@ class DataGetter(AnyDataGetter):
             theta = np.radians(np.asarray(hf['exchange/theta'][s,...]), dtype = np.float32)
             proj = np.asarray(hf['exchange/data'][s,vert_slice,...], dtype = np.float32)        
             
-        if theta.size != NTHETA_180:
+        if theta.size != self.NTHETA_180:
             raise ValueError("full 180 not available for given istart")
         else:
             return proj, theta
@@ -112,7 +108,7 @@ class DataGetter(AnyDataGetter):
         istart = np.argmin(np.abs(self.time_exposed_all - time_elapsed))
         projs, theta = self._get_projections_180deg(istart, vert_slice = vert_slice)
         
-#         import pdb; pdb.set_trace()
+        
         vol_rec = solver(projs, theta, self.center, self.dark, self.flat, \
                          contrast_adjust_factor = contrast_s, \
                          mask_ratio = mask_ratio, \
@@ -121,54 +117,49 @@ class DataGetter(AnyDataGetter):
                          apply_fbp = True, \
                          apply_minus_log = True, TIMEIT = False)
         return vol_rec
-    
 
 if __name__ == "__main__":
     
     import matplotlib.pyplot as plt
     import matplotlib as mpl
     mpl.use('Agg')
-    
-
     from config import *
     
-    hf = h5py.File(fnames[0], 'r')
-    delta_t = hf['measurement/instrument/detector/exposure_time'][:]
-    # pixel_size = hf['measurement/instrument/detector/pixel_size'][:]
-    hf.close()    
-
+    import pdb; pdb.set_trace()
+    
     dget = DataGetter(*fnames)
     imgs = []
     t_vals = []
-    center_val = dget.find_center(0)    
     
-    from tqdm import trange
-    for idx in trange(200):
-        true_idx = 90*idx
-        img_t = dget.reconstruct_window(true_idx,center_val, **recon_params)[0]
-        imgs.append(img_t)
-        t_vals.append(true_idx*delta_t)
+######### FOR MAKING A VIDEO ###############    
+#     center_val = self.center
+#     from tqdm import trange
+#     for idx in trange(200):
+#         true_idx = 90*idx
+#         img_t = dget.reconstruct_window(true_idx,center_val, **recon_params)[0]
+#         imgs.append(img_t)
+#         t_vals.append(true_idx*delta_t)
 
-    save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/fullfield_video'
+#     save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/fullfield_video'
     
     
-    for ii in trange(len(imgs)):
-        fig, ax = plt.subplots(1,1)
-        ax.imshow(imgs[ii], cmap = 'gray')
-        ax.axis('off')
-        ax.text(30,50,'t = %2.0f secs'%t_vals[ii])
-        plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
-        plt.close()
+#     for ii in trange(len(imgs)):
+#         fig, ax = plt.subplots(1,1)
+#         ax.imshow(imgs[ii], cmap = 'gray')
+#         ax.axis('off')
+#         ax.text(30,50,'t = %2.0f secs'%t_vals[ii])
+#         plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
+#         plt.close()
 
-    save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/zoomed_video'
-    for ii in trange(len(imgs)):
-        scrop = slice(400,600,None)
-        fig, ax = plt.subplots(1,1)
-        ax.imshow(imgs[ii][scrop, scrop], cmap = 'gray')
-        ax.axis('off')
-        ax.text(15,25,'t = %2.0f secs'%t_vals[ii])
-        plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
-        plt.close()
+#     save_plot_path = '/home/atekawade/Dropbox/Arg/transfers/plots_aisteer/zoomed_video'
+#     for ii in trange(len(imgs)):
+#         scrop = slice(400,600,None)
+#         fig, ax = plt.subplots(1,1)
+#         ax.imshow(imgs[ii][scrop, scrop], cmap = 'gray')
+#         ax.axis('off')
+#         ax.text(15,25,'t = %2.0f secs'%t_vals[ii])
+#         plt.savefig(os.path.join(save_plot_path, 'plot%02d.png'%ii)) 
+#         plt.close()
         
         
         

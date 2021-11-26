@@ -16,7 +16,7 @@ def get_training_params():
     
     training_params = {"sampling_method" : "random-fixed-width", \
                        "batch_size" : 10, \
-                       "n_epochs" : 30,\
+                       "n_epochs" : 5,\
                        "random_rotate" : True, \
                        "add_noise" : 0.15, \
                        "max_stride" : 1,\

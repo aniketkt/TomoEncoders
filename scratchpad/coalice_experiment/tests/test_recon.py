@@ -12,19 +12,20 @@ import h5py
 import sys
 
 sys.path.append('../')
-from recon4D import DataGetter
+from recon4D import SomeProjectionStream
 from tomo_encoders.misc import viewer
 from tomo_encoders import DataFile
 from config import *
 
 if __name__ == "__main__":
-    
-    dget = DataGetter(*fnames)
+   
+    dget = SomeProjectionStream(*fnames, NTHETA_180, EXPOSURE_TIME_PER_PROJ)
     print("Time range: %.2f to %.2f seconds"%(dget.time_exposed_all.min(), dget.time_exposed_all.max()))
     print("Time per 180: 3.61 seconds")    
 
-    time_elapsed_list = [0.0, 150.0] #[0, 10.0, 20.0, 30.0, 60.0, 150.0]
-
+    
+    time_elapsed_list = [0.0, 50.0] #[0, 10.0, 20.0, 30.0, 60.0, 150.0]
+    
     for time_elapsed in time_elapsed_list:
         vol_t = dget.reconstruct_window(time_elapsed, **recon_params)
         # save it

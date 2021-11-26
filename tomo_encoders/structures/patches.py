@@ -719,7 +719,6 @@ class Patches():
         
         _ndim = len(self.vol_shape)
         assert vol.shape == self.vol_shape, "Shape of big volume does not match vol_shape attribute of patches data"
-
         
         if patch_size is not None:
             # calculate binning

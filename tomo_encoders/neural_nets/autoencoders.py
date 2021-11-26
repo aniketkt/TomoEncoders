@@ -54,9 +54,9 @@ def insert_activation(tensor_in, activation):
         tensor_out = L.LeakyReLU(alpha = 0.2)(tensor_in)
     else:
         tensor_out = L.Activation(activation)(tensor_in)
-    
     return tensor_out
-    
+
+
 def hidden_layer(tensor_in, n_hidden, activation = None, batch_norm = False):
     """
     Define a fully-connected layer with batch normalization, dropout and custom activations.
@@ -536,7 +536,6 @@ class SelfSupervisedCAE(EmbeddingLearner):
         '''
         self.model_keys = ["encoder", "decoder", "autoencoder"]
         self.output_type = "embeddings"
-        
         super().__init__(**kwargs)
         
         return
@@ -544,6 +543,8 @@ class SelfSupervisedCAE(EmbeddingLearner):
     def save_models(self, model_path):
         
         for model_key in self.models.keys():
+            if model_key == "autoencoder":
+                continue
             filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag))
             self.models[model_key].save(filepath, include_optimizer = False)
         return
@@ -566,7 +567,7 @@ class SelfSupervisedCAE(EmbeddingLearner):
 
         # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
         self.model_size = model_size
-        self.model_tag = "%i_%s"%(model_params["hidden_units"][-1], descriptor_tag)
+        self.model_tag = "%s"%descriptor_tag
 
         for key in self.model_keys:
             self.models.update({key : None})
@@ -576,7 +577,7 @@ class SelfSupervisedCAE(EmbeddingLearner):
       
         return
     
-    def _load_models(self, model_tag, model_path = 'some/path'):
+    def _load_models(self, model_tag = None, model_size = (64,64,64), model_path = 'some-path'):
         
         '''
         Parameters
@@ -587,10 +588,15 @@ class SelfSupervisedCAE(EmbeddingLearner):
             example "some/path"
             
         '''
+        assert model_tag is not None, "need model_tag"
+        
         self.models = {} # clears any existing models linked to this class!!!!
         for model_key in self.model_keys:
-            filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, model_tag))
-            self.models.update({model_key : load_model(filepath)})
+            if model_key == "autoencoder":
+                self.models.update({model_key : None})
+            else:
+                filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, model_tag))
+                self.models.update({model_key : load_model(filepath)})
         # insert assignment of model_size here
         self.model_size = self.models["encoder"].input_shape[1:-1]
         self.model_tag = model_tag
