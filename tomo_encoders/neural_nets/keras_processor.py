@@ -24,6 +24,8 @@ import abc
 import time
 from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
 
+from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
+
 
 
 class GenericKerasProcessor():
@@ -379,6 +381,80 @@ class Vox2VoxProcessor_fCNN(GenericKerasProcessor):
             y[y == 0] = 1.0e-12
             yield x, y
 
+    def _build_models(self, descriptor_tag = "misc", **model_params):
+        '''
+        
+        Implementation of Segmenter_fCNN that removes blank volumes during training.  
+        Parameters
+        ----------
+        model_keys : list  
+            list of strings describing the model, e.g., ["segmenter"], etc.
+        model_params : dict
+            for passing any number of model hyperparameters necessary to define the model(s).
+            
+        '''
+        if model_params is None:
+            raise ValueError("Need model hyperparameters or instance of model. Neither were provided")
+        else:
+            self.models = {}
+
+        # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
+            
+        self.model_tag = "Unet_%s"%(descriptor_tag)
+
+        if self.output_type == "data":
+            model_key = "enhancer"
+        elif self.output_type == "labels":
+            model_key = "segmenter"
+        self.models.update({model_key : None})
+        # input_size here is redundant if the network is fully convolutional
+        self.models[model_key] = build_Unet_3D(**model_params)
+        self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
+                                         loss= tf.keras.losses.MeanSquaredError())
+        return
+
+    def _load_models(self, model_names = None, model_path = 'some/path'):
+        
+        '''
+        Parameters
+        ----------
+        model_names : dict
+            example {"segmenter" : "Unet"}
+        model_path : str  
+            example "some/path"
+        custom_objects_dict : dict  
+            dictionary of custom objects (usually pickled with the keras models)
+            
+        '''
+        self.models = {} # clears any existing models linked to this class!!!!
+        for model_key, model_name in model_names.items():
+            self.models.update({model_key : \
+                                load_model(os.path.join(model_path, \
+                                                        model_name + '.hdf5'))})
+        if self.output_type == "data":
+            model_key = "enhancer"
+        elif self.output_type == "labels":
+            model_key = "segmenter"
+        
+        self.model_tag = "_".join(model_names[model_key].split("_")[1:])
+        return
+    
+    def save_models(self, model_path):
+        
+        if self.output_type == "data":
+            model_key = "enhancer"
+        elif self.output_type == "labels":
+            model_key = "segmenter"
+        
+        model = self.models[model_key]
+        filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag))
+        tf.keras.models.save_model(model, filepath, include_optimizer=False)        
+        return
+            
+            
+            
+            
+            
 if __name__ == "__main__":
     
     print('just a bunch of functions')

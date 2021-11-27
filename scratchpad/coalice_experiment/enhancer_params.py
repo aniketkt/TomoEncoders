@@ -2,26 +2,42 @@
 # -*- coding: utf-8 -*- 
 """ 
 """ 
-
-# to-do: get these inputs from command line or config file
-model_path = '/data02/MyArchive/aisteer_3Dencoders/models/coal-ice-regularized'
 import os
+# to-do: get these inputs from command line or config file
+model_path = '/data02/MyArchive/aisteer_3Dencoders/models/coalice_enhancer'
 if not os.path.exists(model_path):
     os.makedirs(model_path)
 
-
-    
 ############ MODEL PARAMETERS ############
-def get_training_params():
+def get_training_params(TRAINING_INPUT_SIZE):
     
     training_params = {"sampling_method" : "random", \
-                       "batch_size" : 10, \
-                       "n_epochs" : 5,\
+                       "training_input_size" : (64,64,64),\
+                       "batch_size" : 24, \
+                       "n_epochs" : 30,\
                        "random_rotate" : True, \
-                       "add_noise" : 0.15, \
-                       "max_stride" : 2,\
-                       "normalize_sampling_factor": 4}
+                       "add_noise" : 0.05, \
+                       "max_stride" : 2, \
+                       "mask_ratio" : 0.95}
     
+    if TRAINING_INPUT_SIZE == (64,64,64):
+        # default
+        pass
+
+    elif TRAINING_INPUT_SIZE == (32,32,32):
+        training_params["training_input_size"] = TRAINING_INPUT_SIZE
+        training_params["batch_size"] = 4
+        training_params["max_stride"] = 2
+        training_params["cutoff"] = 0.1
+    
+    elif TRAINING_INPUT_SIZE == (256,256,256):
+        training_params["training_input_size"] = TRAINING_INPUT_SIZE
+        training_params["batch_size"] = 4
+        training_params["max_stride"] = 2
+        training_params["cutoff"] = 0.0
+    else:
+        raise ValueError("input size not catalogued yet")
+
     print("\n", "#"*55, "\n")
     print("\nTraining parameters\n")
     for key, value in training_params.items():
@@ -30,13 +46,14 @@ def get_training_params():
     return training_params
         
 ############ MODEL PARAMETERS ############
+
 def get_model_params(model_tag):
 
-    m = {"n_filters" : [16, 32, 64],\
+    m = {"n_filters" : [16, 32, 64], \
          "n_blocks" : 3, \
          "activation" : 'lrelu', \
          "batch_norm" : True, \
-         "hidden_units" : [128, 128], \
+         "isconcat" : [True, True, True], \
          "pool_size" : [2,2,2]}
     
     # default
@@ -73,6 +90,7 @@ def get_model_params(model_tag):
         raise ValueError("model_tag not found")
         
     model_params["n_blocks"] = len(model_params["n_filters"])
+    model_params["isconcat"] = [True]*len(model_params["n_filters"])
 
     print("\n", "#"*55, "\n")
     print("\nModel is %s"%model_tag)

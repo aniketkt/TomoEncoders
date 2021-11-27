@@ -19,8 +19,6 @@ fnames = ['/data02/MyArchive/coalice/melting_086.h5', \
 recon_params = {"mask_ratio" : 0.95, \
                 "contrast_s" : 0.01}
 recon_path = '/data02/MyArchive/coalice/recons'
-model_path = '/data02/MyArchive/aisteer_3Dencoders/models/coal-ice-regularized'
-
 
 hf = h5py.File(fnames[0], 'r')
 delta_t = hf['measurement/instrument/detector/exposure_time'][:]

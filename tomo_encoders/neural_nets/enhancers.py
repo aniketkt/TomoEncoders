@@ -5,49 +5,56 @@ class implementations for real-time 3D feature extraction
 
 
 """
-
+from abc import abstractmethod
 import pandas as pd
 import os
 import glob
 import numpy as np
 
-
-# from skimage.feature import match_template
-# from tomopy import normalize, minus_log, angles, recon, circ_mask
-# from scipy.ndimage.filters import median_filter
-
+from tensorflow.keras import layers as L
+from tensorflow import keras
+from tomo_encoders.neural_nets.Unet3D import analysis_block, synthesis_block, custom_Conv3D
 from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import UpSampling3D
 from multiprocessing import Pool, cpu_count
 import functools
 import cupy as cp
 import h5py
 import abc
 import time
+from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
+from tomo_encoders.neural_nets.keras_processor import Vox2VoxProcessor_fCNN
 
-MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if count is exceeded.
-# Parameters for weighted cross-entropy and focal loss - alpha is higher than 0.5 to emphasize loss in "ones" or metal pixels.
-from tomo_encoders.neural_nets.segmenter import focal_loss, Segmenter_fCNN, build_Unet_3D
-from tomo_encoders.rw_utils.data_pairs import read_data_pair, load_dataset_pairs
+DEFAULT_INPUT_SIZE = None
+MAX_ITERS = 1000
+class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
 
-class SparseSegmenter(Segmenter_fCNN):
-    
     def __init__(self,**kwargs):
         super().__init__(**kwargs)
-    
         # could be "data" or "label"
         self.input_type = "data"
-        self.output_type = "labels"
+        self.output_type = "data"
         return
+
+    def random_data_generator(self, batch_size, input_size = (64,64,64)):
+
+        while True:
+            x_shape = tuple([batch_size] + list(input_size) + [1])
+            x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
+            y = np.random.randint(0, 2, x_shape)#.astype(np.uint8)
+            x[x == 0] = 1.0e-12
+            yield x, y
     
     def train(self, Xs, Ys, batch_size, \
               sampling_method, n_epochs,\
               random_rotate = False, \
               add_noise = 0.1,\
               max_stride = 1, \
-              cutoff = 0.0):
+              mask_ratio = 0.95, \
+              training_input_size = DEFAULT_INPUT_SIZE):
         
         '''
         Parameters  
@@ -60,14 +67,15 @@ class SparseSegmenter(Segmenter_fCNN):
                                  max_stride = max_stride, \
                                  random_rotate = random_rotate, \
                                  add_noise = add_noise, \
-                                 cutoff = cutoff)
+                                 mask_ratio = mask_ratio, \
+                                 input_size = training_input_size)
         tot_steps = 1000
         val_split = 0.2
         steps_per_epoch = int((1-val_split)*tot_steps//batch_size)
         validation_steps = int(val_split*tot_steps//batch_size)
 
         t0 = time.time()
-        self.models["segmenter"].fit(x = dg, epochs = n_epochs,\
+        self.models["enhancer"].fit(x = dg, epochs = n_epochs,\
                   steps_per_epoch=steps_per_epoch,\
                   validation_steps=validation_steps, verbose = 1)    
         t1 = time.time()
@@ -75,21 +83,13 @@ class SparseSegmenter(Segmenter_fCNN):
         print("training time = %.2f seconds"%training_time)        
         
         return
-    
-    def _find_blanks(self, patches, cutoff, Y_gt, input_size = (64,64,64)):
         
-        assert Y_gt.shape == patches.vol_shape, "volume of Y_gt does not match vol_shape"
-        y_tmp = patches.extract(Y_gt, input_size)[...,np.newaxis]
-        ystd = np.std(y_tmp, axis = (1,2,3))
-
-        cond_list = ystd > np.max(ystd)*cutoff
-        return cond_list.astype(bool)
-    
     def get_patches(self, vol_shape,\
                     sampling_method, \
                     batch_size, \
                     max_stride = None, \
-                    cutoff = 0.0, Y_gt = None, input_size = (64,64,64)):
+                    mask_ratio = 0.95, \
+                    input_size = DEFAULT_INPUT_SIZE):
         ip = 0
         tot_len = 0
         patches = None
@@ -112,10 +112,10 @@ class SparseSegmenter(Segmenter_fCNN):
             else:
                 raise ValueError("sampling method not supported")
             
-            # blank removal - avoid if not requested.
-            # to-do: how fast is blank removal?
-            if cutoff > 0.0:
-                cond_list = self._find_blanks(p_tmp, cutoff, Y_gt)
+            # to-do: insert cylindrical crop mask to avoid unreconstructed areas
+            mask_ratio = 1.00
+            if mask_ratio < 1.00:
+                cond_list = self._find_within_cylindrical_crop(p_tmp, cutoff)
             else:
                 cond_list = np.asarray([True]*len(p_tmp)).astype(bool)
             
@@ -135,11 +135,18 @@ class SparseSegmenter(Segmenter_fCNN):
         assert patches is not None, "get_patches() failed to return any patches with selected conditions"
         patches = patches.select_random_sample(batch_size)
         return patches
-    
-
-    def data_generator(self, Xs, Ys, batch_size, sampling_method, max_stride = 1, random_rotate = False, add_noise = 0.1, cutoff = 0.0, return_patches = False, TIMEIT = False):
-
         
+    def _find_within_cylindrical_crop(self, p_tmp, mask_ratio):
+        
+        ystd = np.std(y_tmp, axis = (1,2,3))
+        cond_list = ystd > np.max(ystd)*cutoff
+        raise NotImplementedError("do this")
+        return cond_list.astype(bool)
+        
+    def data_generator(self, Xs, Ys, batch_size, sampling_method, \
+                       max_stride = 1, random_rotate = False, \
+                       add_noise = 0.1, mask_ratio = 0.95, \
+                       input_size = DEFAULT_INPUT_SIZE):
         '''
         
         Parameters  
@@ -156,7 +163,6 @@ class SparseSegmenter(Segmenter_fCNN):
         '''
         
         while True:
-            
             n_vols = len(Xs)
             # sample volumes
             # use _get_xy
@@ -165,47 +171,20 @@ class SparseSegmenter(Segmenter_fCNN):
             
             xy = []
             for ivol in range(n_vols):
-                
-                
                 patches = self.get_patches(Xs[ivol].shape, \
                                            sampling_method, \
                                            np.sum(idx_vols == ivol),\
                                            max_stride = max_stride, \
-                                           cutoff = cutoff,\
-                                           Y_gt = Ys[ivol])
-                xy.append(self.extract_training_patch_pairs(Xs[ivol], \
-                                                            Ys[ivol], \
-                                                            patches, \
-                                                            add_noise, \
-                                                            random_rotate))
-                
-            
-            yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
-
-            
-            
-            
-    def load_datasets(self, datasets, normalize_sampling_factor = 4, TIMEIT = False):
-    
-        '''
-        Parameters  
-        ----------  
-        
-        '''
-        Xs, Ys = load_dataset_pairs(datasets, \
-                               normalize_sampling_factor = normalize_sampling_factor, \
-                               TIMEIT = TIMEIT)
-        return Xs, Ys
-    
-            
-            
-            
-            
-            
+                                           mask_ratio = mask_ratio, \
+                                           input_size = input_size)
+                xy.append(self.extract_training_patch_pairs(Xs[ivol], Ys[ivol], patches, add_noise, random_rotate))
+            yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'float32')
 
 if __name__ == "__main__":
     
     print('just a bunch of functions')
+    
+        
         
         
         

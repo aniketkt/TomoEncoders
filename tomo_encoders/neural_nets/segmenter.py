@@ -13,7 +13,7 @@ import numpy as np
 
 from tensorflow.keras import layers as L
 from tensorflow import keras
-from tomo_encoders.neural_nets.porosity_encoders import analysis_block, synthesis_block, custom_Conv3D
+from tomo_encoders.neural_nets.Unet3D import build_Unet3D
 from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
@@ -86,100 +86,6 @@ class Segmenter_fCNN(Vox2VoxProcessor_fCNN):
             yield x, y
     
     
-def build_Unet_3D(n_filters = [16,32,64], \
-                  n_blocks = 3, activation = 'lrelu',\
-                  batch_norm = True, kern_size = 3, kern_size_upconv = 2,\
-                  isconcat = None, pool_size = 2):
-    """
-    Define a 3D convolutional Unet, based on the arguments provided. Output image size is the same as input image size.  
-    
-    Returns
-    -------
-    tf.Keras.model
-        keras model(s) for a 3D autoencoder-decoder architecture.  
-        
-    Parameters
-    ----------
-    vol_shape  : tuple
-            input volume shape (nz,ny,nx,1)  
-            
-    n_filters : list
-            a list of the number of filters in the convolutional layers for each block. Length must equal number of number of blocks.  
-            
-    n_blocks  : int
-            Number of repeating blocks in the convolutional part  
-            
-    activation : str or tf.Keras.layers.Activation
-            name of custom activation or Keras activation layer  
-            
-    batch_norm : bool
-            True to insert BN layer after the convolutional layers  
-            
-    kern_size  : tuple
-            kernel size for conv. layers in downsampling block, e.g. (3,3,3).  
-            
-    kern_size_upconv  : tuple
-            kernel size for conv. layers in upsampling block, e.g. (2,2,2).  
-            
-    isconcat : bool or list
-            Selectively concatenate layers (skip connections)  
-    
-    pool_size : int or list
-            if list, list length must be equal to number of blocks.  
-            
-    """
-    
-    inp = L.Input((None,None,None,1))
-    
-    if isconcat is None:
-        isconcat = [False]*n_blocks
-    
-    if type(pool_size) is int:
-        pool_size = [pool_size]*n_blocks
-    elif len(pool_size) != n_blocks:
-        raise ValueError("list length must be equal to number of blocks")
-        
-    concats = []
-    # downsampling path. e.g. n_blocks = 3, n_filters = [16,32,64], input volume is 64^3
-    for ii in range(n_blocks): # 3 iterations
-        
-        if ii == 0:
-            code = inp
-            
-        code, concat_tensor = analysis_block(code, \
-                                             n_filters[ii], \
-                                             pool_size[ii], \
-                                             kern_size = kern_size, \
-                                             activation = activation, \
-                                             batch_norm = batch_norm)
-        concats.append(concat_tensor)
-
-    nf = code.shape[-1]
-    code = custom_Conv3D(code, nf, kern_size, \
-                         activation = activation, batch_norm = batch_norm)
-    decoded = custom_Conv3D(code, 2*nf, kern_size, \
-                         activation = activation, batch_norm = batch_norm)    
-    
-    # upsampling path. e.g. n_blocks = 3
-    for ii in range(n_blocks-1, -1, -1):
-        # ii is 2, 1, 0
-#         print("############# ii = %i"%ii)
-        
-        decoded = synthesis_block(decoded, \
-                                  2*n_filters[ii], \
-                                  pool_size[ii], \
-                                  concat_tensor = concats[ii], \
-                                  activation = activation, \
-                                  kern_size = kern_size, \
-                                  kern_size_upconv = kern_size_upconv, \
-                                  batch_norm = batch_norm, \
-                                  concat_flag = isconcat[ii])
-        
-    decoded = L.Conv3D(1, (1,1,1), activation = 'sigmoid', padding = "same")(decoded)
-    
-    segmenter = keras.models.Model(inp, decoded, name = "segmenter")
-    
-    return segmenter
     
     
     
