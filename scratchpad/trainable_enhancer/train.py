@@ -15,6 +15,12 @@ except:
     pass        
 ######### END GPU SETTINGS ############
 
+##### FILE PATHS ############
+from tifffile import imread
+fname_X = '/data02/MyArchive/solder_imaging/25.tif'
+fname_Y = '/data02/MyArchive/solder_imaging/25_enhanced.tif'
+fname_X_test = '/data02/MyArchive/solder_imaging/35.tif'
+
 import matplotlib.pyplot as plt 
 import numpy as np 
 import cupy as cp 
@@ -30,55 +36,50 @@ from tomo_encoders.neural_nets.enhancers import Enhancer_fCNN
 
 # import matplotlib as mpl
 # mpl.use('Agg')
-from enhancer_params import *
+from params import *
 from vis_utils import show_planes
 #### THIS EXPERIMENT ####
-model_size = (32,32,32)
-chunk_size = 64
-model_tag = "M_a01"
-from recon4D import SomeProjectionStream
+INPUT_SIZE = (128,128,128)
+INFERENCE_BATCH_SIZE = 4
+model_tag = "M_a05"
 from config import *
 
-def fit(model_params):
-    training_params = get_training_params(model_size)
-    dget = SomeProjectionStream(*fnames, NTHETA_180, EXPOSURE_TIME_PER_PROJ)
-    print("Time range: %.2f to %.2f seconds"%(dget.time_exposed_all.min(), dget.time_exposed_all.max()))
-    print("Time per 180: 3.61 seconds")    
+def load_volume(fname):
+    vol = imread(fname).astype(np.float32)
+    
+    min_val = vol.min()
+    max_val = vol.max()
+    
+    assert max_val - min_val > 1.0e-12, "max - min < 1.0e-12. Is this volume empty?"
+    vol = (vol - min_val) / (max_val - min_val)
+    return vol
 
-    time_elapsed_list = [0.0, 10.0, 50.0]
-    vols = []
-    for time_elapsed in time_elapsed_list:
-        vols.append(dget.reconstruct_window(time_elapsed, **recon_params))
+def fit(model_params):
+    training_params = get_training_params(INPUT_SIZE)
+
+    Xs = [load_volume(fname_X)]
+    Ys = [load_volume(fname_Y)]
+    
+    assert all([Xs[i].shape == Ys[i].shape for i in range(len(Xs))])
+    
     
     fe = Enhancer_fCNN(model_initialization = 'define-new', \
                            descriptor_tag = model_tag, \
                            **model_params)    
-    t0 = time.time()
-    fe.train(vols, vols, **training_params)
-    t1 = time.time()
-    training_time = (t1 - t0)
-    print("training time per epoch = %.2f seconds"%(training_time/training_params["n_epochs"]))
-    
+    fe.train(Xs, Ys, **training_params)
     fe.save_models(model_path)
     sys.exit()
     return
 
-
 def infer(model_params):
     
-    dget = SomeProjectionStream(*fnames, NTHETA_180, EXPOSURE_TIME_PER_PROJ)
-    print("Time range: %.2f to %.2f seconds"%(dget.time_exposed_all.min(), dget.time_exposed_all.max()))
-    print("Time per 180: 3.61 seconds")    
-
     model_names = {"enhancer" : "enhancer_Unet_%s"%model_tag}
     fe = Enhancer_fCNN(model_initialization = 'load-model', \
                        model_names = model_names,\
                        model_path = model_path)    
     
     time_elapsed = 10.0
-    vols = []
-    
-    vol = dget.reconstruct_window(time_elapsed, **recon_params)
+    vol = load_volume(fname_X_test)
     show_planes(vol, filetag = "original")
         
     itercount = 0
@@ -86,11 +87,10 @@ def infer(model_params):
         itercount += 1
         print("ITERATION %i"%itercount)
         
-#         import pdb; pdb.set_trace()
-        p = Patches(vol.shape, initialize_by = 'regular-grid', patch_size = model_size)
-        x = p.extract(vol, model_size)[...,np.newaxis]
+        p = Patches(vol.shape, initialize_by = 'grid', patch_size = INPUT_SIZE)
+        x = p.extract(vol, INPUT_SIZE)[...,np.newaxis]
         min_max = vol[::2,::2,::2].min(), vol[::2,::2,::2].max()
-        x, _ = fe.predict_patches("enhancer", x, chunk_size, None, min_max = min_max, TIMEIT = True)
+        x, _ = fe.predict_patches("enhancer", x, INFERENCE_BATCH_SIZE, None, min_max = min_max, TIMEIT = True)
         x = x[...,0]
         p.fill_patches_in_volume(x, vol)
         show_planes(vol, filetag = "enhanced_iter%02d"%itercount)
@@ -102,7 +102,7 @@ if __name__ == "__main__":
     print("EXPERIMENT WITH MODEL %s"%model_tag)
     model_params = get_model_params(model_tag)
     
-    print("EXPERIMENT WITH INPUT_SIZE = ", model_size)
+    print("EXPERIMENT WITH INPUT_SIZE = ", INPUT_SIZE)
     if len(sys.argv) > 1:
         if sys.argv[1] == "infer":
             infer(model_params)

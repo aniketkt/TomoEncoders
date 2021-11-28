@@ -5,24 +5,9 @@
 import sys 
 import tensorflow as tf
 
-# ######## START GPU SETTINGS ############
 # to-do: find a way to limit gpu memory usage during training
-# mem_limit_tf_gpu = 48.0
-# gpus = tf.config.list_physical_devices('GPU')
-# if gpus:
-#     # Restrict TensorFlow to only allocate 1GB of memory on the first GPU
-#     try:
-#         tf.config.set_logical_device_configuration(gpus[0],[tf.config.LogicalDeviceConfiguration(memory_limit=mem_limit_tf_gpu)])
-#         logical_gpus = tf.config.list_logical_devices('GPU')
-#         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-#     except RuntimeError as e:
-#         # Virtual devices must be set before GPUs have been initialized
-#         print(e)
-
-# ######### END GPU SETTINGS ############
-
 ######## START GPU SETTINGS ############
-########## SET MEMORY GROWTH to True ############
+# Set MEMORY GROWTH to True
 physical_devices = tf.config.list_physical_devices('GPU')
 try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -43,7 +28,7 @@ import os
 import tqdm
 import pandas as pd
 from tomo_encoders.neural_nets.autoencoders import SelfSupervisedCAE
-
+from vis_utils import show_planes
 # import matplotlib as mpl
 # mpl.use('Agg')
 from params import *
@@ -133,20 +118,10 @@ def encode_decode(model_params):
         import pdb; pdb.set_trace()
         vol_out = vol.copy()
         p.fill_patches_in_volume(x, vol_out)
-#         show_planes(vol)
-#         show_planes(vol_out)
+#         show_planes(vol, filetag = "input_to_encoder")
+#         show_planes(vol_out, filetag = "output_from_decoder")
     
     return
-
-def show_planes(vol):
-    
-    fig, ax = plt.subplots(1,3, figsize = (14,6))
-    ax[0].imshow(vol[int(vol.shape[0]*0.2)], cmap = 'gray')
-    ax[1].imshow(vol[int(vol.shape[0]*0.5)], cmap = 'gray')
-    ax[2].imshow(vol[int(vol.shape[0]*0.8)], cmap = 'gray')                
-    plt.show()
-    plt.close()
-    
 
 if __name__ == "__main__":
 

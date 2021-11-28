@@ -12,7 +12,7 @@ import numpy as np
 from tomo_encoders.misc.viewer import view_midplanes
 
 
-plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/scratchpad_coalice_experiment'
+plot_out_path = '/home/atekawade/Dropbox/Arg/transfers/runtime_plots/scratchpad_enhancer'
 if not os.path.exists(plot_out_path):
     os.makedirs(plot_out_path)
 
@@ -23,6 +23,8 @@ def show_planes(vol, filetag = None):
     ax[1].imshow(vol[int(vol.shape[0]*0.5)], cmap = 'gray')
     ax[2].imshow(vol[int(vol.shape[0]*0.8)], cmap = 'gray')                
     
+    
+    import pdb; pdb.set_trace()
     if filetag is None:
         plt.show()
     else:
@@ -63,10 +65,8 @@ def show_in_volume(vols, p, sel_idx):
                 elif ia == 2: sy, sx = slices[0], slices[1]
                 seg_img[sy, sx] = 1
             ax[tstep, ia].imshow(seg_img, cmap = 'copper', alpha = 0.3)            
-# ax[0].scatter([center[2]],[center[1]])
-# ax[1].scatter([center[2]],[center[0]])
-# ax[2].scatter([center[1]],[center[0]])    
 
+            
 if __name__ == "__main__":
     
     print('just a bunch of functions')

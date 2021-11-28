@@ -54,14 +54,14 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
               add_noise = 0.1,\
               max_stride = 1, \
               mask_ratio = 0.95, \
-              training_input_size = DEFAULT_INPUT_SIZE):
+              training_input_size = None, steps_per_epoch = None):
         
         '''
         Parameters  
         ----------  
-        
         '''
         n_vols = len(Xs)
+        
         # instantiate data generator for use in training.  
         dg = self.data_generator(Xs, Ys, batch_size, sampling_method, \
                                  max_stride = max_stride, \
@@ -69,18 +69,18 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
                                  add_noise = add_noise, \
                                  mask_ratio = mask_ratio, \
                                  input_size = training_input_size)
-        tot_steps = 1000
-        val_split = 0.2
-        steps_per_epoch = int((1-val_split)*tot_steps//batch_size)
-        validation_steps = int(val_split*tot_steps//batch_size)
 
+        validation_steps_per_epoch = int(0.25*steps_per_epoch)
+
+        
         t0 = time.time()
         self.models["enhancer"].fit(x = dg, epochs = n_epochs,\
                   steps_per_epoch=steps_per_epoch,\
-                  validation_steps=validation_steps, verbose = 1)    
+                  validation_steps=validation_steps_per_epoch, verbose = 1)    
         t1 = time.time()
         training_time = (t1 - t0)
         print("training time = %.2f seconds"%training_time)        
+        print("training time per epoch = %.2f seconds"%(training_time/n_epochs))
         
         return
         
@@ -89,7 +89,7 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
                     batch_size, \
                     max_stride = None, \
                     mask_ratio = 0.95, \
-                    input_size = DEFAULT_INPUT_SIZE):
+                    input_size = None):
         ip = 0
         tot_len = 0
         patches = None
@@ -146,7 +146,7 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
     def data_generator(self, Xs, Ys, batch_size, sampling_method, \
                        max_stride = 1, random_rotate = False, \
                        add_noise = 0.1, mask_ratio = 0.95, \
-                       input_size = DEFAULT_INPUT_SIZE):
+                       input_size = None):
         '''
         
         Parameters  
@@ -177,7 +177,7 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
                                            max_stride = max_stride, \
                                            mask_ratio = mask_ratio, \
                                            input_size = input_size)
-                xy.append(self.extract_training_patch_pairs(Xs[ivol], Ys[ivol], patches, add_noise, random_rotate))
+                xy.append(self.extract_training_patch_pairs(Xs[ivol], Ys[ivol], patches, add_noise, random_rotate, input_size))
             yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'float32')
 
 if __name__ == "__main__":

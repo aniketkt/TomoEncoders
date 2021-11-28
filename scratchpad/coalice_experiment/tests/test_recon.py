@@ -16,6 +16,8 @@ from recon4D import SomeProjectionStream
 from tomo_encoders.misc import viewer
 from tomo_encoders import DataFile
 from config import *
+from vis_utils import plot_out_path
+plot_tag = "reconstruction_test"
 
 if __name__ == "__main__":
    
@@ -43,5 +45,9 @@ if __name__ == "__main__":
     ax[0].imshow(vol_t[int(vol_t.shape[0]*0.2)], cmap = 'gray')
     ax[1].imshow(vol_t[int(vol_t.shape[0]*0.5)], cmap = 'gray')
     ax[2].imshow(vol_t[int(vol_t.shape[0]*0.8)], cmap = 'gray')                
-    plt.show()
+    
+    if plot_tag is None:
+        plt.show()
+    else:
+        plt.savefig(os.path.join(plot_out_path, plot_tag + ".png"))
     plt.close()

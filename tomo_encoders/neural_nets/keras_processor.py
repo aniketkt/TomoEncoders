@@ -349,7 +349,7 @@ class Vox2VoxProcessor_fCNN(GenericKerasProcessor):
             y_pred = self.predict_patches(model_key, x, chunk_size, None, min_max = (-1,1), TIMEIT = True)
         return
 
-    def extract_training_patch_pairs(self, X, Y, patches, add_noise, random_rotate, input_size = (64,64,64)):
+    def extract_training_patch_pairs(self, X, Y, patches, add_noise, random_rotate, input_size):
         '''
         Extract training pairs x and y from a given volume X, Y pair
         '''

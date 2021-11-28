@@ -693,6 +693,7 @@ class Patches():
         
     def _calc_binning(self, patch_size):        
         bin_vals = self.widths//np.asarray(patch_size)
+        
         cond1 = np.sum(np.max(bin_vals, axis = 1) != np.min(bin_vals, axis = 1)) > 0
         cond2 = np.any(bin_vals == 0)
         cond3 = np.any(self.widths%np.asarray(patch_size))

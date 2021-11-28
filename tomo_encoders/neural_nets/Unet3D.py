@@ -124,9 +124,12 @@ def analysis_block(tensor_in, n_filters, pool_size, \
                                activation = activation, \
                                batch_norm = batch_norm)
 
-    # MaxPool3D
-    return L.MaxPool3D(pool_size = pool_size, padding = "same")(tensor_out), tensor_out
-
+    assert type(pool_size) is int, "pool_size must be an integer"
+    if pool_size > 1:
+        # MaxPool3D
+        return L.MaxPool3D(pool_size = pool_size, padding = "same")(tensor_out), tensor_out
+    else:
+        return tensor_out, tensor_out
 
 def synthesis_block(tensor_in, n_filters, pool_size, \
                     concat_tensor = None, \
@@ -164,15 +167,19 @@ def synthesis_block(tensor_in, n_filters, pool_size, \
     concat_flag : bool
             True to concatenate layers (add skip connections)
     """
+    assert type(pool_size) is int, "pool_size must be an integer"
     
-    # transpose convolution
-    n_filters_upconv = tensor_in.shape[-1]
-    tensor_out = L.Conv3DTranspose(n_filters_upconv, kern_size_upconv, padding = "same", activation = None, strides = pool_size) (tensor_in)
-    tensor_out = insert_activation(tensor_out, activation)
+    if pool_size > 1:
+    
+        # transpose convolution
+        n_filters_upconv = tensor_in.shape[-1]
+        tensor_out = L.Conv3DTranspose(n_filters_upconv, kern_size_upconv, padding = "same", activation = None, strides = pool_size) (tensor_in)
+        tensor_out = insert_activation(tensor_out, activation)
 
-    if concat_flag:
-        tensor_out = L.concatenate([tensor_out, concat_tensor])
-    
+        if concat_flag:
+            tensor_out = L.concatenate([tensor_out, concat_tensor])
+    else:
+        tensor_out = tensor_in
     
     # layer # 1
     tensor_out = custom_Conv3D(tensor_out, n_filters, kern_size, \
@@ -241,6 +248,7 @@ def build_Unet_3D(n_filters = [16,32,64], \
         pool_size = [pool_size]*n_blocks
     elif len(pool_size) != n_blocks:
         raise ValueError("list length must be equal to number of blocks")
+            
         
     concats = []
     # downsampling path. e.g. n_blocks = 3, n_filters = [16,32,64], input volume is 64^3
