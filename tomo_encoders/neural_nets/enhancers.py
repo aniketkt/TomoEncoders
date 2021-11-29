@@ -11,14 +11,11 @@ import os
 import glob
 import numpy as np
 
-from tensorflow.keras import layers as L
 from tensorflow import keras
-from tomo_encoders.neural_nets.Unet3D import analysis_block, synthesis_block, custom_Conv3D
 from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import UpSampling3D
 from multiprocessing import Pool, cpu_count
 import functools
 import cupy as cp

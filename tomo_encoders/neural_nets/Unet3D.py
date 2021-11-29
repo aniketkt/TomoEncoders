@@ -249,7 +249,6 @@ def build_Unet_3D(n_filters = [16,32,64], \
     elif len(pool_size) != n_blocks:
         raise ValueError("list length must be equal to number of blocks")
             
-        
     concats = []
     # downsampling path. e.g. n_blocks = 3, n_filters = [16,32,64], input volume is 64^3
     for ii in range(n_blocks): # 3 iterations
@@ -274,7 +273,6 @@ def build_Unet_3D(n_filters = [16,32,64], \
     # upsampling path. e.g. n_blocks = 3
     for ii in range(n_blocks-1, -1, -1):
         # ii is 2, 1, 0
-#         print("############# ii = %i"%ii)
         
         decoded = synthesis_block(decoded, \
                                   2*n_filters[ii], \

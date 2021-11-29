@@ -11,7 +11,7 @@ if not os.path.exists(model_path):
     os.makedirs(model_path)
 
 ############ MODEL PARAMETERS ############
-def get_training_params(TRAINING_INPUT_SIZE):
+def get_training_params(TRAINING_INPUT_SIZE, N_EPOCHS = None, N_STEPS_PER_EPOCH = None, BATCH_SIZE = None):
     
     training_params = {"sampling_method" : "random", \
                        "training_input_size" : (64,64,64),\
@@ -54,6 +54,13 @@ def get_training_params(TRAINING_INPUT_SIZE):
     else:
         raise ValueError("input size not catalogued yet")
 
+    if N_EPOCHS is not None:
+        training_params["n_epochs"] = N_EPOCHS
+    if N_STEPS_PER_EPOCH is not None:
+        training_params["steps_per_epoch"] = N_STEPS_PER_EPOCH
+    if BATCH_SIZE is not None:
+        training_params["batch_size"] = BATCH_SIZE
+    
     print("\n", "#"*55, "\n")
     print("\nTraining parameters\n")
     for key, value in training_params.items():
@@ -99,15 +106,17 @@ def get_model_params(model_tag):
         model_params["pool_size"] = [1]
         
     elif model_tag == "M_a06":
-        raise NotImplementError("not implemented")
-        model_params["n_filters"] = [16, 32]
-        model_params["pool_size"] = [ 2,  2]
+        model_params["n_filters"] = [8]
+        model_params["pool_size"] = [2]
         
     else:
         raise ValueError("model_tag not found")
         
     model_params["n_blocks"] = len(model_params["n_filters"])
     model_params["isconcat"] = [True]*len(model_params["n_filters"])
+    
+    # BATCH_NORM_OVERRIDE
+#     model_params["batch_norm"] = False
 
     print("\n", "#"*55, "\n")
     print("\nModel is %s"%model_tag)

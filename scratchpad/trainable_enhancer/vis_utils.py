@@ -19,12 +19,14 @@ if not os.path.exists(plot_out_path):
 def show_planes(vol, filetag = None):
     
     fig, ax = plt.subplots(1,3, figsize = (14,6))
+
+#     view_midplanes(vol = vol, ax = ax)
     ax[0].imshow(vol[int(vol.shape[0]*0.2)], cmap = 'gray')
     ax[1].imshow(vol[int(vol.shape[0]*0.5)], cmap = 'gray')
     ax[2].imshow(vol[int(vol.shape[0]*0.8)], cmap = 'gray')                
     
     
-    import pdb; pdb.set_trace()
+#     import pdb; pdb.set_trace()
     if filetag is None:
         plt.show()
     else:

@@ -20,7 +20,7 @@ from tifffile import imread
 fname_X = '/data02/MyArchive/solder_imaging/25.tif'
 fname_Y = '/data02/MyArchive/solder_imaging/25_enhanced.tif'
 fname_X_test = '/data02/MyArchive/solder_imaging/35.tif'
-
+from tomo_encoders.misc.viewer import view_midplanes
 import matplotlib.pyplot as plt 
 import numpy as np 
 import cupy as cp 
@@ -41,7 +41,12 @@ from vis_utils import show_planes
 #### THIS EXPERIMENT ####
 INPUT_SIZE = (128,128,128)
 INFERENCE_BATCH_SIZE = 4
-model_tag = "M_a05"
+
+N_EPOCHS = 10 
+N_STEPS_PER_EPOCH = 20 
+TRAINING_BATCH_SIZE = 8
+model_tag = "M_a06"
+
 from config import *
 
 def load_volume(fname):
@@ -55,10 +60,16 @@ def load_volume(fname):
     return vol
 
 def fit(model_params):
-    training_params = get_training_params(INPUT_SIZE)
+    training_params = get_training_params(INPUT_SIZE, \
+                                          N_EPOCHS = N_EPOCHS, \
+                                          N_STEPS_PER_EPOCH = N_STEPS_PER_EPOCH, \
+                                          BATCH_SIZE = TRAINING_BATCH_SIZE)
 
     Xs = [load_volume(fname_X)]
     Ys = [load_volume(fname_Y)]
+    
+    show_planes(Xs[0], filetag = "training_input")
+    show_planes(Ys[0], filetag = "training_target")
     
     assert all([Xs[i].shape == Ys[i].shape for i in range(len(Xs))])
     
@@ -66,6 +77,10 @@ def fit(model_params):
     fe = Enhancer_fCNN(model_initialization = 'define-new', \
                            descriptor_tag = model_tag, \
                            **model_params)    
+    
+    fe.print_layers('enhancer')
+    
+    
     fe.train(Xs, Ys, **training_params)
     fe.save_models(model_path)
     sys.exit()
@@ -81,7 +96,7 @@ def infer(model_params):
     time_elapsed = 10.0
     vol = load_volume(fname_X_test)
     show_planes(vol, filetag = "original")
-        
+    
     itercount = 0
     while True:
         itercount += 1
@@ -92,9 +107,20 @@ def infer(model_params):
         min_max = vol[::2,::2,::2].min(), vol[::2,::2,::2].max()
         x, _ = fe.predict_patches("enhancer", x, INFERENCE_BATCH_SIZE, None, min_max = min_max, TIMEIT = True)
         x = x[...,0]
-        p.fill_patches_in_volume(x, vol)
-        show_planes(vol, filetag = "enhanced_iter%02d"%itercount)
-    
+        
+        crop_val = 5
+        sc = slice(crop_val, -crop_val, None)
+        x = x[:,sc,sc,sc]
+        p.widths = p.widths - 2*crop_val
+        p.points = p.points + crop_val
+        
+        vol_out = np.zeros(vol.shape, dtype = np.float32) # ERASE OLD VOLUME !!!!        
+        p.fill_patches_in_volume(x, vol_out)
+        show_planes(vol_out, filetag = "enhanced_iter%02d"%itercount)
+        
+        break
+        
+        
     return
 
 if __name__ == "__main__":
@@ -108,10 +134,6 @@ if __name__ == "__main__":
             infer(model_params)
         elif sys.argv[1] == "fit":
             fit(model_params)
-    
-    
-    
-    
     
     
     
