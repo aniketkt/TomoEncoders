@@ -310,6 +310,7 @@ autodoc_mock_imports = [
     'configargparse',
     'cupyx',
     'porespy',
+    'tifffile',
     'numpy', 
     'pandas', 
     'scipy', 
