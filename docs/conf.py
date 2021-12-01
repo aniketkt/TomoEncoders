@@ -311,6 +311,7 @@ autodoc_mock_imports = [
     'cupyx',
     'porespy',
     'tifffile',
+    'mpl_toolkits',
     'numpy', 
     'pandas', 
     'scipy', 
