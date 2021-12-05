@@ -35,11 +35,11 @@ from tomo_encoders.rw_utils.data_pairs import read_data_pair, load_dataset_pairs
 class SparseSegmenter(Segmenter_fCNN):
     
     def __init__(self,**kwargs):
-        super().__init__(**kwargs)
-    
+        
         # could be "data" or "label"
         self.input_type = "data"
         self.output_type = "labels"
+        super().__init__(**kwargs)
         return
     
     def train(self, Xs, Ys, batch_size, \

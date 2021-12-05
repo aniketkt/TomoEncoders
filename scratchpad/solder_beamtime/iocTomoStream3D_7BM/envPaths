@@ -1,0 +1,7 @@
+epicsEnvSet("IOC","iocTomoStream_7BM")
+epicsEnvSet("TOP","/home/beams9/7BMB/epics/synApps/support/tomostream")
+epicsEnvSet("SUPPORT","/home/beams/7BMB/epics/synApps/support")
+epicsEnvSet("BUSY","/home/beams/7BMB/epics/synApps/support/busy-R1-7-2")
+epicsEnvSet("AUTOSAVE","/home/beams/7BMB/epics/synApps/support/autosave-R5-10")
+epicsEnvSet("ASYN","/home/beams/7BMB/epics/synApps/support/asyn-R4-37")
+epicsEnvSet("EPICS_BASE","/home/beams/7BMB/epics/epics-base")

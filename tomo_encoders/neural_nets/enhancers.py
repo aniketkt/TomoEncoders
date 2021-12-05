@@ -81,6 +81,37 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
         
         return
         
+        
+        
+    def _build_models(self, descriptor_tag = "misc", **model_params):
+        '''
+        
+        Implementation of Segmenter_fCNN that removes blank volumes during training.  
+        Parameters
+        ----------
+        model_keys : list  
+            list of strings describing the model, e.g., ["segmenter"], etc.
+        model_params : dict
+            for passing any number of model hyperparameters necessary to define the model(s).
+            
+        '''
+        if model_params is None:
+            raise ValueError("Need model hyperparameters or instance of model. Neither were provided")
+        else:
+            self.models = {}
+
+        # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
+            
+        self.model_tag = "Unet_%s"%(descriptor_tag)
+
+        model_key = "enhancer"
+        self.models.update({model_key : None})
+        # input_size here is redundant if the network is fully convolutional
+        self.models[model_key] = build_Unet_3D(**model_params)
+        self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
+                                         loss= tf.keras.losses.MeanSquaredError())
+        return
+        
     def get_patches(self, vol_shape,\
                     sampling_method, \
                     batch_size, \

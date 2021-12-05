@@ -124,6 +124,7 @@ class GenericKerasProcessor():
                     z = self.models["encoder"].predict(x_in)
                     x_out = self.models["decoder"].predict(z)
                 else:
+                    
                     x_out = self.models[model_key].predict(x_in)
 
                 if k == nchunks -1:
@@ -380,38 +381,6 @@ class Vox2VoxProcessor_fCNN(GenericKerasProcessor):
             x[x == 0] = 1.0e-12
             y[y == 0] = 1.0e-12
             yield x, y
-
-    def _build_models(self, descriptor_tag = "misc", **model_params):
-        '''
-        
-        Implementation of Segmenter_fCNN that removes blank volumes during training.  
-        Parameters
-        ----------
-        model_keys : list  
-            list of strings describing the model, e.g., ["segmenter"], etc.
-        model_params : dict
-            for passing any number of model hyperparameters necessary to define the model(s).
-            
-        '''
-        if model_params is None:
-            raise ValueError("Need model hyperparameters or instance of model. Neither were provided")
-        else:
-            self.models = {}
-
-        # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
-            
-        self.model_tag = "Unet_%s"%(descriptor_tag)
-
-        if self.output_type == "data":
-            model_key = "enhancer"
-        elif self.output_type == "labels":
-            model_key = "segmenter"
-        self.models.update({model_key : None})
-        # input_size here is redundant if the network is fully convolutional
-        self.models[model_key] = build_Unet_3D(**model_params)
-        self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
-                                         loss= tf.keras.losses.MeanSquaredError())
-        return
 
     def _load_models(self, model_names = None, model_path = 'some/path'):
         

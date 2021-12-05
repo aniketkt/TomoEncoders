@@ -13,7 +13,7 @@ import numpy as np
 
 from tensorflow.keras import layers as L
 from tensorflow import keras
-from tomo_encoders.neural_nets.Unet3D import build_Unet3D
+from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
 from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
@@ -68,11 +68,12 @@ def focal_loss(y_true, y_pred):
 class Segmenter_fCNN(Vox2VoxProcessor_fCNN):
 
     def __init__(self,**kwargs):
-        super().__init__(**kwargs)
-    
+        
         # could be "data" or "label"
         self.input_type = "data"
         self.output_type = "labels"
+        super().__init__(**kwargs)
+    
         return
 
     def random_data_generator(self, batch_size, input_size = (64,64,64)):
@@ -85,6 +86,34 @@ class Segmenter_fCNN(Vox2VoxProcessor_fCNN):
             x[x == 0] = 1.0e-12
             yield x, y
     
+    def _build_models(self, descriptor_tag = "misc", **model_params):
+        '''
+        
+        Implementation of Segmenter_fCNN that removes blank volumes during training.  
+        Parameters
+        ----------
+        model_keys : list  
+            list of strings describing the model, e.g., ["segmenter"], etc.
+        model_params : dict
+            for passing any number of model hyperparameters necessary to define the model(s).
+            
+        '''
+        if model_params is None:
+            raise ValueError("Need model hyperparameters or instance of model. Neither were provided")
+        else:
+            self.models = {}
+
+        # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
+            
+        self.model_tag = "Unet_%s"%(descriptor_tag)
+
+        model_key = "segmenter"
+        self.models.update({model_key : None})
+        # input_size here is redundant if the network is fully convolutional
+        self.models[model_key] = build_Unet_3D(**model_params)
+        self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
+                                         loss= tf.keras.losses.BinaryCrossentropy())
+        return
     
     
     

@@ -1,0 +1,22 @@
+# autosave R5.3	Automatically generated - DO NOT MODIFY - 211205-042318
+7bmtomo:EncoderStream:TomoScanPVPrefix 7bmtomo:TSS:
+7bmtomo:EncoderStream:ImagePVAPName 7bmtomo:TSS:PvaPluginPVPrefix
+7bmtomo:EncoderStream:DarkPVAName 7bmtomo:TSS:StreamDarkFields
+7bmtomo:EncoderStream:FlatPVAName 7bmtomo:TSS:StreamFlatFields
+7bmtomo:EncoderStream:ThetaPVAName 7bmtomo:TSS:StreamTheta
+7bmtomo:EncoderStream:ReconPVAName 7bmtomo:EncoderStream:StreamRecon
+7bmtomo:EncoderStream:BufferSize 34/800
+7bmtomo:EncoderStream:Center 227.5
+7bmtomo:EncoderStream:CenterTweak 1
+7bmtomo:EncoderStream:CenterTweakUp 222.5
+7bmtomo:EncoderStream:CenterTweakDown 221.5
+7bmtomo:EncoderStream:Dezinger 0
+7bmtomo:EncoderStream:RingRemoval 0
+7bmtomo:EncoderStream:FilterType 0
+7bmtomo:EncoderStream:OrthoX 121
+7bmtomo:EncoderStream:OrthoY 203
+7bmtomo:EncoderStream:OrthoZ 178
+7bmtomo:EncoderStream:RotX 0
+7bmtomo:EncoderStream:RotY 0
+7bmtomo:EncoderStream:RotZ 0
+<END>
