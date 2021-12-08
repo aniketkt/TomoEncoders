@@ -24,8 +24,8 @@ import abc
 import time
 from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
 from tomo_encoders.neural_nets.keras_processor import Vox2VoxProcessor_fCNN
+from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
 
-DEFAULT_INPUT_SIZE = None
 MAX_ITERS = 1000
 class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
 
@@ -81,8 +81,6 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
         
         return
         
-        
-        
     def _build_models(self, descriptor_tag = "misc", **model_params):
         '''
         
@@ -111,7 +109,38 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
         self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
                                          loss= tf.keras.losses.MeanSquaredError())
         return
+
+
+    def save_models(self, model_path):
         
+        model_key = "enhancer"
+        model = self.models[model_key]
+        filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag))
+        tf.keras.models.save_model(model, filepath, include_optimizer=False)        
+        return
+    
+    def _load_models(self, model_names = None, model_path = 'some/path'):
+        
+        '''
+        Parameters
+        ----------
+        model_names : dict
+            example {"segmenter" : "Unet"}
+        model_path : str  
+            example "some/path"
+        custom_objects_dict : dict  
+            dictionary of custom objects (usually pickled with the keras models)
+            
+        '''
+        self.models = {} # clears any existing models linked to this class!!!!
+        for model_key, model_name in model_names.items():
+            self.models.update({model_key : \
+                                load_model(os.path.join(model_path, \
+                                                        model_name + '.hdf5'))})
+        model_key = "enhancer"
+        self.model_tag = "_".join(model_names[model_key].split("_")[1:])
+        return
+
     def get_patches(self, vol_shape,\
                     sampling_method, \
                     batch_size, \
@@ -140,12 +169,8 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
             else:
                 raise ValueError("sampling method not supported")
             
-            # to-do: insert cylindrical crop mask to avoid unreconstructed areas
-            mask_ratio = 1.00
-            if mask_ratio < 1.00:
-                cond_list = self._find_within_cylindrical_crop(p_tmp, cutoff)
-            else:
-                cond_list = np.asarray([True]*len(p_tmp)).astype(bool)
+            # insert cylindrical crop mask to avoid unreconstructed areas
+            cond_list = p_tmp._is_within_cylindrical_crop(mask_ratio, 1.0)
             
             if np.sum(cond_list) > 0:
                 # do stuff
@@ -159,17 +184,9 @@ class Enhancer_fCNN(Vox2VoxProcessor_fCNN):
             else:
                 continue
         
-        
         assert patches is not None, "get_patches() failed to return any patches with selected conditions"
         patches = patches.select_random_sample(batch_size)
         return patches
-        
-    def _find_within_cylindrical_crop(self, p_tmp, mask_ratio):
-        
-        ystd = np.std(y_tmp, axis = (1,2,3))
-        cond_list = ystd > np.max(ystd)*cutoff
-        raise NotImplementedError("do this")
-        return cond_list.astype(bool)
         
     def data_generator(self, Xs, Ys, batch_size, sampling_method, \
                        max_stride = 1, random_rotate = False, \

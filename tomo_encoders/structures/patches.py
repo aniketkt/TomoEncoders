@@ -25,7 +25,7 @@ import tensorflow as tf
 from tensorflow.keras.layers import UpSampling3D
 
 
-class Patches():
+class Patches(dict):
     
     def __init__(self, vol_shape, initialize_by = "data", \
                  features = None, names = [], **kwargs):
@@ -39,7 +39,6 @@ class Patches():
         '''
         
         self.vol_shape = vol_shape
-        
         initializers = {"data" : self._check_data, \
                         "slices" : self._from_slices,\
                         "grid" : self._set_grid, \
@@ -53,6 +52,8 @@ class Patches():
             # cast to integer dtype
             self.points = self.points.astype(np.uint32)
             self.widths = self.widths.astype(np.uint32)
+            self['points'] = self.points
+            self['widths'] = self.widths
             return
         else:
             self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
@@ -60,6 +61,9 @@ class Patches():
             # cast to integer dtype
             self.points = self.points.astype(np.uint32)
             self.widths = self.widths.astype(np.uint32)
+            self['points'] = self.points
+            self['widths'] = self.widths
+
             
             self._check_valid_points()
             # append features if passed
@@ -68,7 +72,6 @@ class Patches():
             self.add_features(features, names)
             return
 
-        
     def __len__(self):
         return len(self.points)
     
@@ -89,10 +92,7 @@ class Patches():
     def _load_from_disk(self, fpath = None):
         
         with h5py.File(fpath, 'r') as hf:
-            vol_shape = tuple(np.asarray(hf["vol_shape"]))
-            if np.any(vol_shape != self.vol_shape):
-                raise ValueError("Volume shape of patches requested does not match the attribute read from the file")
-                
+            self.vol_shape = tuple(np.asarray(hf["vol_shape"]))
             self.points = np.asarray(hf["points"])
             self.widths = np.asarray(hf["widths"])
             if "features" in hf:
@@ -105,7 +105,6 @@ class Patches():
                 self.feature_names = [name.decode('UTF-8') for name in out_list]
             else:
                 self.feature_names = []
-
     
     def add_features(self, features, names = []):
         '''
@@ -140,7 +139,11 @@ class Patches():
             raise ValueError("feature array and corresponding names input are not compatible")
         else:
             self.feature_names += names
-        
+
+        # set attributes so that Patches() is callable by feature name
+        for ii, key in enumerate(self.feature_names):
+            self[key] = self.features[:,ii]
+            
         return
     
     def append(self, more_patches):
@@ -473,18 +476,31 @@ class Patches():
             out_list.append(self.features[:,self.feature_names.index(name)])
         return np.asarray(out_list).T
     
-    
+    def _is_within_cylindrical_crop(self, mask_ratio, height_ratio):
+        
+        '''
+        returns a boolean array
+        '''
+        assert self.vol_shape[1] == self.vol_shape[2], "must be tomographic CT volume (ny = nx = n)"
+        nz, n = self.vol_shape[:2]
+        centers = self.centers()
+        radii = np.sqrt(np.power(centers[:,1] - n/2.0, 2) + np.power(centers[:,2] - n/2.0, 2))
+        clist1 = radii < mask_ratio*n/2.0
+        
+        heights = np.abs(centers[:,0] - nz/2.0)
+        clist2 = heights < height_ratio*nz/2.0
+
+        cond_list = clist1&clist2
+#         print("CALL TO: %s"%self._is_within_cylindrical_crop.__name__)
+        return cond_list
+        
     def filter_by_cylindrical_mask(self, mask_ratio = 0.9, height_ratio = 1.0):
         '''
         Selects patches whose centers lie inside a cylindrical volume of radius = mask_ratio*nx/2. This assumes that the volume shape is a tomogram where ny = nx. The patches are filtered along the vertical (or z) axis if height_ratio < 1.0.  
         '''
         
-        max_radius = int(mask_ratio*self.vol_shape[-1]/2.0)
-        max_z_from_center = int(height_ratio*self.vol_shape[0]/2.0)
-        
-        p_centers = self.centers()
-        return
-    
+        cond_list = self._is_within_cylindrical_crop(mask_ratio, height_ratio)
+        return self.filter_by_condition(cond_list)
     
     def filter_by_condition(self, cond_list):
         '''  

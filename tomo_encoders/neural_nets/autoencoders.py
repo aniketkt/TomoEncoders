@@ -535,7 +535,6 @@ class SelfSupervisedCAE(EmbeddingLearner):
 
         '''
         self.model_keys = ["encoder", "decoder", "autoencoder"]
-        self.output_type = "embeddings"
         super().__init__(**kwargs)
         
         return
@@ -602,6 +601,76 @@ class SelfSupervisedCAE(EmbeddingLearner):
         self.model_tag = model_tag
         return
     
+    
+    
+    def data_generator(self, Xs, batch_size, sampling_method, \
+                       max_stride = 1, \
+                       random_rotate = False, add_noise = 0.1):
+        
+        '''
+        
+        Parameters  
+        ----------  
+        vol : np.array  
+            Volume from which patches are extracted.  
+        batch_size : int  
+            Size of the batch generated at every iteration.  
+        sampling_method : str  
+            Possible methods include "random", "random-fixed-width", "grid"  
+        max_stride : int  
+            If method is "random" or "multiple-grids", then max_stride is required.  
+        
+        '''
+        
+        while True:
+            
+            n_vols = len(Xs)
+            # sample volumes
+            # use _get_xy
+            idx_vols = np.repeat(np.arange(0, n_vols), int(np.ceil(batch_size/n_vols)))
+            idx_vols = idx_vols[:batch_size]
+            
+            x = []
+            for ivol in range(n_vols):
+                patches = self.get_patches(Xs[ivol].shape, sampling_method, np.sum(idx_vols == ivol), max_stride = max_stride)
+                x.append(self.extract_training_sub_volumes(Xs[ivol], patches, add_noise, random_rotate))
+            
+            yield np.concatenate(x, axis = 0, dtype = 'float32')
+    
+    def extract_training_sub_volumes(self, X, patches, add_noise, random_rotate):
+        '''
+        Extract training pairs x and y from a given volume X, Y pair
+        '''
+        
+        batch_size = len(patches)
+        x = patches.extract(X, self.model_size)[...,np.newaxis]
+
+        if random_rotate:
+            nrots = np.random.randint(0, 4, batch_size)
+            for ii in range(batch_size):
+                axes = tuple(np.random.choice([0, 1, 2], size=2, replace=False))
+                x[ii, ..., 0] = np.rot90(x[ii, ..., 0], k=nrots[ii], axes=axes)
+        
+        return x    
+
+    
+    def get_patches(self, vol_shape, sampling_method, batch_size, max_stride = None):
+
+        if sampling_method in ["grid", 'regular-grid', "random-fixed-width"]:
+            patches = Patches(vol_shape, initialize_by = sampling_method, \
+                              patch_size = self.model_size, \
+                              n_points = batch_size)    
+
+        elif sampling_method in ["random"]:
+            patches = Patches(vol_shape, initialize_by = sampling_method, \
+                              min_patch_size = self.model_size, \
+                              max_stride = max_stride, \
+                              n_points = batch_size)    
+        else:
+            raise ValueError("sampling method not supported")
+
+        return patches    
+    
     def train(self, vols, batch_size = 10, \
               sampling_method = 'random-fixed-width', \
               n_epochs = 10, \
@@ -647,7 +716,67 @@ class SelfSupervisedCAE(EmbeddingLearner):
         print("training time = %.2f seconds"%training_time)        
         
         return
+
+    def random_data_generator(self, batch_size):
+
+        while True:
+
+            x_shape = tuple([batch_size] + list(self.input_size) + [1])
+            x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
+            x[x == 0] = 1.0e-12
+            yield x
+    
+    def predict_embeddings(self, x, chunk_size, min_max = None, TIMEIT = False):
+
+        '''
+        Predicts on sub_vols. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
         
+        '''
+        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
+        
+        t0 = time.time()
+        print("call to keras predict, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
+        nb = len(x)
+        nchunks = int(np.ceil(nb/chunk_size))
+        nb_padded = nchunks*chunk_size
+        padding = nb_padded - nb
+
+        out_arr = np.zeros((nb, self.models["encoder"].output_shape[-1]), dtype = np.float32) # use numpy since return from predict is numpy
+
+        for k in range(nchunks):
+
+            sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
+            x_in = x[sb,...]
+
+            if min_max is not None:
+                min_val, max_val = min_max
+                x_in = _rescale_data(x_in, float(min_val), float(max_val))
+            
+            if padding != 0:
+                if k == nchunks - 1:
+                    x_in = np.pad(x_in, \
+                                  ((0,padding), (0,0), \
+                                   (0,0), (0,0), (0,0)), mode = 'edge')
+                x_out = self.models["encoder"].predict(x_in)
+
+                if k == nchunks -1:
+                    x_out = x_out[:-padding,...]
+            else:
+                x_out = self.models["encoder"].predict(x_in)
+                
+            out_arr[sb,...] = x_out
+        
+        print("shape of output array: ", out_arr.shape)
+        t_unit = (time.time() - t0)*1000.0/nb
+        
+        if TIMEIT:
+            print("inf. time p. input patch size %s = %.2f ms, nb = %i"%(str(x[0,...,0].shape), t_unit, nb))
+            print("\n")
+            return out_arr, t_unit
+        else:
+            return out_arr
+    
+    
 #     def detect_changes(self, vol_prev, vol_curr, patches):
         
 #         '''
