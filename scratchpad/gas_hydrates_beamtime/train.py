@@ -81,8 +81,8 @@ def infer(model_params):
         vol = load_datasets(fpath, tsteps = [tstep])[0]
         x = p.extract(vol, INFERENCE_INPUT_SIZE)[...,np.newaxis]
         
-        import pdb; pdb.set_trace()
-        emb_vec = fe.predict_embeddings(x, n_features)
+        emb_vec = fe.predict_embeddings(x[...,np.newaxis], 'leaky_re_lu_3', 32, TIMEIT = True)  
+        
         
         # do more stuff with this - visualize, send to epics, etc.
         emb_vecs.append(emb_vec)

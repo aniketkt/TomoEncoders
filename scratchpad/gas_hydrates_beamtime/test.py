@@ -28,12 +28,14 @@ import os
 import tqdm
 import pandas as pd
 from feature_extractor import FeatureExtraction_fCNN
+model_key = 'leaky_re_lu_3'
 
 # import matplotlib as mpl
 # mpl.use('Agg')
 from params import *
 from vis_utils import show_planes
 from config import *
+
 
 
 if __name__ == "__main__":
@@ -50,18 +52,21 @@ if __name__ == "__main__":
     sel_tsteps = all_tsteps[:1]
     vol = load_datasets(fpath, tsteps = sel_tsteps)[0]
     
-    fe = FeatureExtraction_fCNN(model_initialization = 'define-new', \
-                           descriptor_tag = model_tag, \
-                           **model_params)    
-
+#     fe = FeatureExtraction_fCNN(model_initialization = 'define-new', \
+#                            descriptor_tag = model_tag, \
+#                            **model_params)    
+    
+    model_names = {"enhancer" : "enhancer_Unet_%s"%model_tag}
+    fe = FeatureExtraction_fCNN(model_initialization = 'load-model', \
+                       model_names = model_names,\
+                       model_path = model_path)    
+    
     p = Patches(vol.shape, initialize_by = 'regular-grid', patch_size = INFERENCE_INPUT_SIZE)
     p = p.filter_by_cylindrical_mask()
-#     emb_vec = fe.predict_embeddings(x, n_features)
     
+    f_array = get_features(vol, p, INFERENCE_INPUT_SIZE, FEATURE_BINNING, 
 #     show_planes(Xs[0], filetag = "training_input")
 #     fe.print_layers('enhancer')
-    
-    
     
     
     

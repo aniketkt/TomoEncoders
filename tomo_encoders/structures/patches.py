@@ -132,13 +132,12 @@ class Patches(dict):
         else:
             self.features = features
             
-        # handle feature names here
-        cond1 = any(self.feature_names)
-        cond2 = len(names) != features.shape[-1]
-        if cond1 and cond2:
-            raise ValueError("feature array and corresponding names input are not compatible")
+        if not any(names):
+            names = ["Unnamed_f%i"%i for i in range(features.shape[-1])]
         else:
-            self.feature_names += names
+            assert len(names) == features.shape[-1], "names of features must match array shape"
+            
+        self.feature_names += names
 
         # set attributes so that Patches() is callable by feature name
         for ii, key in enumerate(self.feature_names):

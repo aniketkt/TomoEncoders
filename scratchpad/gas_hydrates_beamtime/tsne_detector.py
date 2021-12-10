@@ -22,34 +22,60 @@ def tsne_func(f_arr, verbosity = False):
     embeddings = tsne.fit(f_arr)
     return embeddings
 
+def compare_volumes(vol_pair, input_size, n_pts, verbosity = False, sort_by = "lowest"):
 
-def get_features_somehow(vol_pair, p, **kwargs):
     
-    n_features = 5
-    return np.random.normal(0, 1, (len(p), n_features))
-
-def change_detector(vol_pair, patch_size, n_pts, verbosity = False, **kwargs):
-
-    p = Patches(vol_pair[-1].shape, initialize_by = 'regular-grid', patch_size = patch_size, n_points = None)
-
+    #### possible arguments? #########
+    
+    model_key = 'leaky_re_lu_3'
+    
+    ##################################
+    
     # feature extraction
-    f_array = get_features_somehow(vol_pair, p, **kwargs)
+    f0 = fe.get_features(vol_pair[0], \
+                         'regular-grid-tomo', \
+                         model_key, \
+                         input_size, \
+                         feature_binning)
+    
+    f1 = fe.get_features(vol_pair[1], \
+                         'regular-grid-tomo', \
+                         model_key, \
+                         input_size, \
+                         feature_binning)
     
     # feature reduction
-    embedding = tsne_func(f_array, verbosity = verbosity)
-    p.add_features(embedding, names = ["embedding"])
+    change_signal = tsne_func(f1-f0, verbosity = verbosity)
+    p.add_features(change_signal, names = ["change_signal"])
     
     # ROI selection
-    p_sel = p.select_by_feature(n_pts, ife = 0, selection_by = "lowest")
-    
-#     # for visualizing only
-#     rec = vol_pair[-1]
-#     bboxes = p_sel.slices()
-#     for bbox in bboxes:
-#         rec[tuple(bbox)] = 0.3*rec[tuple(bbox)]
-#     change_locations = p_sel.centers()[:n_pts]
+    p_sel = p.select_by_feature(n_pts, ife = 0, selection_by = sort_by)
     
     return p_sel
+
+def search_volume(vol, input_size, n_pts, verbosity = False, sort_by = "lowest"):
+
+    
+    #### possible arguments? #########
+    model_key = 'leaky_re_lu_3'
+    ##################################
+    
+    # feature extraction
+    p = fe.get_features(vol, \
+                         'regular-grid-tomo', \
+                         model_key, \
+                         input_size, \
+                         feature_binning)
+    
+    # feature reduction
+    unique_signal = tsne_func(f_array, verbosity = verbosity)
+    p.add_features(unique_signal, names = ["unique_signal"])
+    
+    # ROI selection
+    p_sel = p.select_by_feature(n_pts, ife = -1, selection_by = sort_by)
+
+    return p_sel
+
 
 if __name__ == "__main__":
 
