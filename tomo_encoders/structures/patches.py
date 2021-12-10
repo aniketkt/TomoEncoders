@@ -118,6 +118,8 @@ class Patches(dict):
 
         if features is None:
             return
+        if features.ndim == 1:
+            features = features.reshape(-1,1)
         
         # handle feature array here
         if len(self.points) != len(features): # check length
