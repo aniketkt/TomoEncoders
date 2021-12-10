@@ -579,6 +579,26 @@ class Patches(dict):
                        names = self.feature_names.copy() if any(self.feature_names) else [])
         
         
+    def perturb(self, perturb_size_vox):
+        '''
+        assumes this is a regular-grid with same patch size everywhere  
+        '''
+        _ndim = len(self.vol_shape)
+        perturbations = np.random.randint(0, perturb_size_vox*2, (len(self), 3))
+        perturbations -= perturb_size_vox
+        wd = self.widths[0,:]
+        points = self.points.copy() + perturbations
+        points[points < 0] = 0
+        
+        for ia in range(_ndim):
+            points[points[:,ia] >  self.vol_shape[ia] - wd[ia], ia] = self.vol_shape[ia] - wd[ia]
+        
+        return Patches(self.vol_shape, initialize_by = "data", \
+                       points = points,\
+                       widths = self.widths.copy(),\
+                       features = None if self.features is None else self.features.copy(), \
+                       names =  self.feature_names if any(self.feature_names) else [])
+        
     def rescale(self, fac, new_vol_shape):
         '''
         '''
