@@ -22,8 +22,8 @@ except:
 ######### END GPU SETTINGS ############
 
 ### READING DATA
-PROJS_PATH = '/data02/MyArchive/AM_part_Xuan/projs' 
-read_fpath = '/data02/MyArchive/AM_part_Xuan/data/mli_L206_HT_650_L3_rec_1x1_uint16.hdf5' 
+PROJS_PATH = '/data02/MyArchive/tomo_datasets/AM_part_Xuan/projs' 
+read_fpath = '/data02/MyArchive/tomo_datasets/AM_part_Xuan/data/mli_L206_HT_650_L3_rec_1x1_uint16.hdf5' 
 from tomo_encoders.misc.voxel_processing import normalize_volume_gpu
 from tomo_encoders import DataFile, Patches
 import h5py 
@@ -54,7 +54,7 @@ N_MAX_DETECT = 25 # 3 for 2 voids - first one is surface
 CIRC_MASK_FRAC = 0.75
 
 ### VISUALIZATION
-HEADLESS = True
+HEADLESS = False
 
 from tomo_encoders.misc.feature_maps_vis import view_midplanes 
 demo_out_path = '/data02/MyArchive/AM_part_Xuan/demo_output'

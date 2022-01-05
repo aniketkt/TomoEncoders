@@ -31,14 +31,14 @@ MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if coun
 # Parameters for weighted cross-entropy and focal loss - alpha is higher than 0.5 to emphasize loss in "ones" or metal pixels.
 from tomo_encoders.neural_nets.segmenter import focal_loss, Segmenter_fCNN, build_Unet_3D
 from tomo_encoders.rw_utils.data_pairs import read_data_pair, load_dataset_pairs
+from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
+
+
 
 class SparseSegmenter(Segmenter_fCNN):
     
     def __init__(self,**kwargs):
         
-        # could be "data" or "label"
-        self.input_type = "data"
-        self.output_type = "labels"
         super().__init__(**kwargs)
         return
     
@@ -135,6 +135,36 @@ class SparseSegmenter(Segmenter_fCNN):
         assert patches is not None, "get_patches() failed to return any patches with selected conditions"
         patches = patches.select_random_sample(batch_size)
         return patches
+
+    def save_models(self, model_path):
+        
+        model_key = "segmenter"
+        model = self.models[model_key]
+        filepath = os.path.join(model_path, "%s_%s.hdf5"%(model_key, self.model_tag))
+        tf.keras.models.save_model(model, filepath, include_optimizer=False)        
+        return
+    
+    def _load_models(self, model_names = None, model_path = 'some/path'):
+        
+        '''
+        Parameters
+        ----------
+        model_names : dict
+            example {"segmenter" : "Unet"}
+        model_path : str  
+            example "some/path"
+        custom_objects_dict : dict  
+            dictionary of custom objects (usually pickled with the keras models)
+            
+        '''
+        self.models = {} # clears any existing models linked to this class!!!!
+        for model_key, model_name in model_names.items():
+            self.models.update({model_key : \
+                                load_model(os.path.join(model_path, \
+                                                        model_name + '.hdf5'))})
+        model_key = "segmenter"
+        self.model_tag = "_".join(model_names[model_key].split("_")[1:])
+        return
     
 
     def data_generator(self, Xs, Ys, batch_size, sampling_method, max_stride = 1, random_rotate = False, add_noise = 0.1, cutoff = 0.0, return_patches = False, TIMEIT = False):
@@ -182,9 +212,65 @@ class SparseSegmenter(Segmenter_fCNN):
             
             yield np.concatenate([xy[ivol][0] for ivol in range(n_vols)], axis = 0, dtype = 'float32'), np.concatenate([xy[ivol][1] for ivol in range(n_vols)], axis = 0, dtype = 'uint8')
 
+    
+    def predict_patches(self, model_key, x, chunk_size, out_arr, \
+                         min_max = None, \
+                         TIMEIT = False):
+
+        '''
+        Predicts sub_vols. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
+        
+        '''
+        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
+        
+        t0 = time.time()
+#         print("call to predict_patches, len(x) = %i, shape = %s, chunk_size = %i"%(len(x), str(x.shape[1:-1]), chunk_size))
+        nb = len(x)
+        nchunks = int(np.ceil(nb/chunk_size))
+        nb_padded = nchunks*chunk_size
+        padding = nb_padded - nb
+
+        if out_arr is None:
+            out_arr = np.empty_like(x) # use numpy since return from predict is numpy
+        else:
+            # to-do: check dims
+            assert out_arr.shape == x.shape, "x and out_arr shapes must be equal and 4-dimensional (batch_size, nz, ny, nx, 1)"
+
+        for k in range(nchunks):
+
+            sb = slice(k*chunk_size , min((k+1)*chunk_size, nb))
+            x_in = x[sb,...]
+
+            if min_max is not None:
+                min_val, max_val = min_max
+                x_in = _rescale_data(x_in, float(min_val), float(max_val))
             
-            
-            
+            if padding != 0:
+                if k == nchunks - 1:
+                    x_in = np.pad(x_in, \
+                                  ((0,padding), (0,0), \
+                                   (0,0), (0,0), (0,0)), mode = 'edge')
+                
+                x_out = self.models[model_key].predict(x_in)
+
+                if k == nchunks -1:
+                    x_out = x_out[:-padding,...]
+            else:
+                x_out = self.models[model_key].predict(x_in)
+            out_arr[sb,...] = x_out
+        
+        out_arr = np.round(out_arr).astype(np.uint8)
+        t_unit = (time.time() - t0)*1000.0/nb
+        
+        if TIMEIT:
+            print("inf. time p. input patch size %s = %.2f ms, nb = %i"%(str(x[0,...,0].shape), t_unit, nb))
+            print("\n")
+            return out_arr, t_unit
+        else:
+            return out_arr
+    
+    
+    
     def load_datasets(self, datasets, normalize_sampling_factor = 4, TIMEIT = False):
     
         '''
