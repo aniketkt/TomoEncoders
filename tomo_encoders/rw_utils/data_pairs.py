@@ -63,10 +63,10 @@ def load_dataset_pairs(datasets, normalize_sampling_factor = 4, TIMEIT = False):
     ii = 0
     for filename, dataset in datasets.items():
 
-        ds_X = DataFile(dataset['fpath_X'], tiff = False, \
+        ds_X = DataFile(dataset['fpath_X'], autodetect_format = True, \
                         data_tag = dataset['data_tag_X'], VERBOSITY = 0)
 
-        ds_Y = DataFile(dataset['fpath_Y'], tiff = False, \
+        ds_Y = DataFile(dataset['fpath_Y'], autodetect_format = True, \
                         data_tag = dataset['data_tag_Y'], VERBOSITY = 0)
 
         Xs[ii], Ys[ii] = read_data_pair(ds_X, ds_Y, dataset['s_crops'], normalize_sampling_factor)

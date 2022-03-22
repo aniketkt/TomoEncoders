@@ -70,50 +70,10 @@ class Segmenter_fCNN(Vox2VoxProcessor_fCNN):
     def __init__(self,**kwargs):
         
         # could be "data" or "label"
-        self.input_type = "data"
-        self.output_type = "labels"
-        super().__init__(**kwargs)
-    
+        raise NotImplementedError("not implemented")
         return
 
-    def random_data_generator(self, batch_size, input_size = (64,64,64)):
-
-        while True:
-
-            x_shape = tuple([batch_size] + list(input_size) + [1])
-            x = np.random.uniform(0, 1, x_shape)#.astype(np.float32)
-            y = np.random.randint(0, 2, x_shape)#.astype(np.uint8)
-            x[x == 0] = 1.0e-12
-            yield x, y
     
-    def _build_models(self, descriptor_tag = "misc", **model_params):
-        '''
-        
-        Implementation of Segmenter_fCNN that removes blank volumes during training.  
-        Parameters
-        ----------
-        model_keys : list  
-            list of strings describing the model, e.g., ["segmenter"], etc.
-        model_params : dict
-            for passing any number of model hyperparameters necessary to define the model(s).
-            
-        '''
-        if model_params is None:
-            raise ValueError("Need model hyperparameters or instance of model. Neither were provided")
-        else:
-            self.models = {}
-
-        # insert your model building code here. The models variable must be a dictionary of models with str descriptors as keys
-            
-        self.model_tag = "Unet_%s"%(descriptor_tag)
-
-        model_key = "segmenter"
-        self.models.update({model_key : None})
-        # input_size here is redundant if the network is fully convolutional
-        self.models[model_key] = build_Unet_3D(**model_params)
-        self.models[model_key].compile(optimizer=tf.keras.optimizers.Adam(),\
-                                         loss= tf.keras.losses.BinaryCrossentropy())
-        return
     
     
     

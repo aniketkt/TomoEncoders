@@ -28,7 +28,7 @@ from tensorflow.keras.layers import UpSampling3D
 class Patches(dict):
     
     def __init__(self, vol_shape, initialize_by = "data", \
-                 features = None, names = [], **kwargs):
+                 features = None, names = [], xp = np, **kwargs):
         '''
         A patch is the set of all pixels in a rectangle / cuboid sampled from a (big) image / volume. The Patches data structure allows the following. Think of this as a pandas DataFrame. Each row stores coordinates and features corresponding to a new patch constrained within a big volume of shape vol_shape.  
         
@@ -39,33 +39,36 @@ class Patches(dict):
         '''
         
         self.vol_shape = vol_shape
+        self.xp = xp
         initializers = {"data" : self._check_data, \
                         "slices" : self._from_slices,\
                         "grid" : self._set_grid, \
                         "regular-grid" : self._set_regular_grid, \
+                        "octree-grid" : self._set_regular_grid,\
                         "multiple-grids" : self._set_multiple_grids, \
                         "random-fixed-width" : self._get_random_fixed_width, \
                         "random" : self._get_random}
 
+        self["source"] = initialize_by
+        
         if initialize_by == "file":
             self._load_from_disk(**kwargs)
             # cast to integer dtype
-            self.points = self.points.astype(np.uint32)
-            self.widths = self.widths.astype(np.uint32)
+            self.points = self.points.astype(self.xp.uint32)
+            self.widths = self.widths.astype(self.xp.uint32)
             self['points'] = self.points
             self['widths'] = self.widths
             return
         else:
-            self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
             
+            self.points, self.widths, self.check_valid = initializers[initialize_by](**kwargs)
             # cast to integer dtype
-            self.points = self.points.astype(np.uint32)
-            self.widths = self.widths.astype(np.uint32)
+            self.points = self.points.astype(self.xp.uint32)
+            self.widths = self.widths.astype(self.xp.uint32)
             self['points'] = self.points
             self['widths'] = self.widths
-
-            
             self._check_valid_points()
+            
             # append features if passed
             self.features = None
             self.feature_names = []
@@ -85,18 +88,18 @@ class Patches(dict):
             if self.features is not None:
                 hf.create_dataset("features", data = self.features)
             if any(self.feature_names):
-                hf.create_dataset("feature_names", data = np.asarray(self.feature_names, dtype = 'S'))
+                hf.create_dataset("feature_names", data = self.xp.asarray(self.feature_names, dtype = 'S'))
         return
     
     # use this when initialize_by = "file"
     def _load_from_disk(self, fpath = None):
         
         with h5py.File(fpath, 'r') as hf:
-            self.vol_shape = tuple(np.asarray(hf["vol_shape"]))
-            self.points = np.asarray(hf["points"])
-            self.widths = np.asarray(hf["widths"])
+            self.vol_shape = tuple(self.xp.asarray(hf["vol_shape"]))
+            self.points = self.xp.asarray(hf["points"])
+            self.widths = self.xp.asarray(hf["widths"])
             if "features" in hf:
-                self.features = np.asarray(hf["features"])
+                self.features = self.xp.asarray(hf["features"])
             else:
                 self.features = None
                 
@@ -112,7 +115,7 @@ class Patches(dict):
         
         Parameters
         ----------
-        features : np.array  
+        features : self.xp.array  
             array of features, must be same length and as corresponding patch coordinates.  
         '''
 
@@ -130,7 +133,7 @@ class Patches(dict):
             npts, nfe = features.shape
 
         if self.features is not None:
-            self.features = np.concatenate([self.features, features], axis = 1)
+            self.features = self.xp.concatenate([self.features, features], axis = 1)
         else:
             self.features = features
             
@@ -166,15 +169,15 @@ class Patches(dict):
         if self.vol_shape != more_patches.vol_shape:
             raise ValueError("patches data is not compatible. Ensure that big volume shapes match")
             
-        self.points = np.concatenate([self.points, more_patches.points], axis = 0)
-        self.widths = np.concatenate([self.widths, more_patches.widths], axis = 0)
+        self.points = self.xp.concatenate([self.points, more_patches.points], axis = 0)
+        self.widths = self.xp.concatenate([self.widths, more_patches.widths], axis = 0)
         
         # if features are not stored already, do nothing more
         if self.features is None:
             return
         
         # if feature vector shapes mismatch, numpy will throw an error for concatenate  
-        self.features = np.concatenate([self.features, more_patches.features], axis = 0)
+        self.features = self.xp.concatenate([self.features, more_patches.features], axis = 0)
         
         # if feature name vectors don't match, raise an error
         if self.feature_names != more_patches.feature_names:
@@ -186,11 +189,11 @@ class Patches(dict):
         
         if len(points) != len(widths):
             raise ValueError("number of anchor points and corresponding widths must match")
-        if np.shape(points)[-1] != np.shape(widths)[-1]:
+        if self.xp.shape(points)[-1] != self.xp.shape(widths)[-1]:
             raise ValueError("dimension mismatch for points and corresponding widths")
             
-        points = np.asarray(points)
-        widths = np.asarray(widths)
+        points = self.xp.asarray(points)
+        widths = self.xp.asarray(widths)
             
         return points, widths, check_valid
 
@@ -199,14 +202,14 @@ class Patches(dict):
         plen = len(s)
         _ndim = len(s[0])
         
-        points = np.empty((plen, 3))
-        widths = np.empty((plen, 3))
+        points = self.xp.empty((plen, 3))
+        widths = self.xp.empty((plen, 3))
         for ii in range(plen):
-            points[ii,...] = np.asarray([s[ii][ia].start for ia in range(_ndim)])
-            widths[ii,...] = np.asarray([s[ii][ia].stop - s[ii][ia].start for ia in range(_ndim)])
+            points[ii,...] = self.xp.asarray([s[ii][ia].start for ia in range(_ndim)])
+            widths[ii,...] = self.xp.asarray([s[ii][ia].stop - s[ii][ia].start for ia in range(_ndim)])
             
-        points = np.asarray(points).astype(int)
-        widths = np.asarray(widths).astype(int)
+        points = self.xp.asarray(points).astype(int)
+        widths = self.xp.asarray(widths).astype(int)
             
         return points, widths, check_valid
     
@@ -242,18 +245,18 @@ class Patches(dict):
             p, w, _ = self._set_grid(patch_size = min_patch_size, stride = stride)
             points.append(p)
             widths.append(w)
-        points = np.concatenate(points, axis = 0)
-        widths = np.concatenate(widths, axis = 0)
+        points = self.xp.concatenate(points, axis = 0)
+        widths = self.xp.concatenate(widths, axis = 0)
             
         if n_points is not None:
             n_points = min(n_points, len(points))
             # sample randomly
             rng = default_rng()
-            idxs = rng.choice(points.shape[0], n_points, replace = False)
+            idxs = self.xp.sort(rng.choice(points.shape[0], n_points, replace = False))
             points = points[idxs,...].copy()
             widths = widths[idxs,...].copy()
         
-        return np.asarray(points), np.asarray(widths), False
+        return self.xp.asarray(points), self.xp.asarray(widths), False
                           
     def _set_grid(self, patch_size = None, stride = 1, n_points = None):
 
@@ -276,7 +279,7 @@ class Patches(dict):
         m = list(self.vol_shape)
         p = list(patch_size)
         
-        nsteps = [int(np.ceil(m[i]/p[i])) for i in range(len(m))]
+        nsteps = [int(self.xp.ceil(m[i]/p[i])) for i in range(len(m))]
         
         stepsize = []
         for i in range(len(nsteps)):
@@ -299,15 +302,15 @@ class Patches(dict):
         
         if n_points is not None:
             n_points = min(n_points, len(points))
-            points = np.asarray(points)
-            widths = np.asarray(widths)
+            points = self.xp.asarray(points)
+            widths = self.xp.asarray(widths)
             # sample randomly
             rng = default_rng()
-            idxs = rng.choice(points.shape[0], n_points, replace = False)
+            idxs = self.xp.sort(rng.choice(points.shape[0], n_points, replace = False))
             points = points[idxs,...].copy()
             widths = widths[idxs,...].copy()
         
-        return np.asarray(points), np.asarray(widths), False
+        return self.xp.asarray(points), self.xp.asarray(widths), False
             
     def _set_regular_grid(self, patch_size = None, n_points = None):
 
@@ -346,15 +349,15 @@ class Patches(dict):
         
         if n_points is not None:
             n_points = min(n_points, len(points))
-            points = np.asarray(points)
-            widths = np.asarray(widths)
+            points = self.xp.asarray(points)
+            widths = self.xp.asarray(widths)
             # sample randomly
             rng = default_rng()
-            idxs = rng.choice(points.shape[0], n_points, replace = False)
+            idxs = self.xp.sort(rng.choice(points.shape[0], n_points, replace = False))
             points = points[idxs,...].copy()
             widths = widths[idxs,...].copy()
         
-        return np.asarray(points), np.asarray(widths), False
+        return self.xp.asarray(points), self.xp.asarray(widths), False
     
     
     def _get_random_fixed_width(self, patch_size = None, n_points = None):
@@ -373,10 +376,10 @@ class Patches(dict):
         _ndim = len(self.vol_shape)
         patch_size = self._check_stride(patch_size, 1)
         
-        points = np.asarray([np.random.randint(0, self.vol_shape[ii] - patch_size[ii], n_points) \
+        points = self.xp.asarray([self.xp.random.randint(0, self.vol_shape[ii] - patch_size[ii], n_points) \
                            for ii in range(_ndim)]).T
-        widths = np.asarray([list(patch_size)]*n_points)
-        return np.asarray(points), np.asarray(widths), False
+        widths = self.xp.asarray([list(patch_size)]*n_points)
+        return self.xp.asarray(points), self.xp.asarray(widths), False
     
     def _get_random(self, min_patch_size = None, max_stride = None, n_points = None):
         """
@@ -396,18 +399,18 @@ class Patches(dict):
         """
         _ndim = len(self.vol_shape)
         _ = self._check_stride(min_patch_size, max_stride) # check max stride before going into the loop
-        random_strides = np.random.randint(1, max_stride, n_points)
+        random_strides = self.xp.random.randint(1, max_stride, n_points)
         points = []
         widths = []
         for stride in random_strides:
             curr_patch_size = self._check_stride(min_patch_size, stride)
-            points.append([np.random.randint(0, self.vol_shape[ii] - curr_patch_size[ii]) for ii in range(_ndim)])    
+            points.append([self.xp.random.randint(0, self.vol_shape[ii] - curr_patch_size[ii]) for ii in range(_ndim)])    
             widths.append(list(curr_patch_size))
 
-        points = np.asarray(points)
-        widths = np.asarray(widths)        
+        points = self.xp.asarray(points)
+        widths = self.xp.asarray(widths)        
         
-        return np.asarray(points), np.asarray(widths), False
+        return self.xp.asarray(points), self.xp.asarray(widths), False
     
     
     def _check_valid_points(self):
@@ -436,7 +439,7 @@ class Patches(dict):
         
         Returns  
         -------  
-        np.ndarray (n_pts, 3)    
+        self.xp.ndarray (n_pts, 3)    
             each element of the array is a slice object  
         
         '''  
@@ -447,7 +450,7 @@ class Patches(dict):
             binning = [binning]*len(self.points)
             
         s = self._points_to_slices(self.points, self.widths, binning)
-        return np.asarray(s)
+        return self.xp.asarray(s)
     
     def centers(self):
         '''  
@@ -455,13 +458,13 @@ class Patches(dict):
         
         Returns  
         -------  
-        np.ndarray (n_pts, 3)    
+        self.xp.ndarray (n_pts, 3)    
             each element of the array is the z, y, x coordinate of the center of the patch volume.    
         
         '''  
         _ndim = len(self.vol_shape)
         s = [[int(self.points[ii,jj] + self.widths[ii,jj]//2) for jj in range(_ndim)] for ii in range(len(self.points))]
-        return np.asarray(s)
+        return self.xp.asarray(s)
     
     def features_to_numpy(self, names):
         '''
@@ -475,7 +478,7 @@ class Patches(dict):
         out_list = []
         for name in names:
             out_list.append(self.features[:,self.feature_names.index(name)])
-        return np.asarray(out_list).T
+        return self.xp.asarray(out_list).T
     
     def _is_within_cylindrical_crop(self, mask_ratio, height_ratio):
         
@@ -485,10 +488,10 @@ class Patches(dict):
         assert self.vol_shape[1] == self.vol_shape[2], "must be tomographic CT volume (ny = nx = n)"
         nz, n = self.vol_shape[:2]
         centers = self.centers()
-        radii = np.sqrt(np.power(centers[:,1] - n/2.0, 2) + np.power(centers[:,2] - n/2.0, 2))
+        radii = self.xp.sqrt(self.xp.power(centers[:,1] - n/2.0, 2) + self.xp.power(centers[:,2] - n/2.0, 2))
         clist1 = radii < mask_ratio*n/2.0
         
-        heights = np.abs(centers[:,0] - nz/2.0)
+        heights = self.xp.abs(centers[:,0] - nz/2.0)
         clist2 = heights < height_ratio*nz/2.0
 
         cond_list = clist1&clist2
@@ -509,7 +512,7 @@ class Patches(dict):
         
         Parameters  
         ----------  
-        cond_list : np.ndarray  
+        cond_list : self.xp.ndarray  
             array with shape (n_pts, n_conditions). Selection will be done based on ALL conditions being met for the given patch.  
         '''  
         
@@ -517,14 +520,14 @@ class Patches(dict):
             raise ValueError("length of condition list must same as the current number of stored points")
         
         if cond_list.ndim == 2:
-            cond_list = np.prod(cond_list, axis = 1) # AND operator on all conditions
+            cond_list = self.xp.prod(cond_list, axis = 1) # AND operator on all conditions
         elif cond_list.ndim > 2:
             raise ValueError("condition list must have 1 or 2 dimensions like so (n_pts,) or (n_pts, n_conditions)")
             
         return Patches(self.vol_shape, initialize_by = "data", \
-                       points = np.compress(cond_list, self.points, axis = 0),\
-                       widths = np.compress(cond_list, self.widths, axis = 0),\
-                       features = None if self.features is None else np.compress(cond_list, self.features, axis = 0), \
+                       points = self.xp.compress(cond_list, self.points, axis = 0),\
+                       widths = self.xp.compress(cond_list, self.widths, axis = 0),\
+                       features = None if self.features is None else self.xp.compress(cond_list, self.features, axis = 0), \
                        names = self.feature_names if any(self.feature_names) else [])
     
     def copy(self):
@@ -584,7 +587,7 @@ class Patches(dict):
         assumes this is a regular-grid with same patch size everywhere  
         '''
         _ndim = len(self.vol_shape)
-        perturbations = np.random.randint(0, perturb_size_vox*2, (len(self), 3))
+        perturbations = self.xp.random.randint(0, perturb_size_vox*2, (len(self), 3))
         perturbations -= perturb_size_vox
         wd = self.widths[0,:]
         points = self.points.copy() + perturbations
@@ -607,15 +610,15 @@ class Patches(dict):
         _names = self.feature_names.copy() if any(self.feature_names) else []
         
         fac = int(fac)
-        px_max = np.max(self.points, axis = 0)*fac
-        extra_pix = np.asarray(new_vol_shape) - px_max
+        px_max = self.xp.max(self.points, axis = 0)*fac
+        extra_pix = self.xp.asarray(new_vol_shape) - px_max
         
 #         cond0 = extra_pix < 0
 #         cond1 = extra_pix > 1
 #         cond_fin = cond0 | cond1
         cond_fin = extra_pix < 0
         
-        if np.any(cond_fin):
+        if self.xp.any(cond_fin):
             raise ValueError("new volume shape is inappropriate")
         else:
             return Patches(new_vol_shape, initialize_by = "data", \
@@ -651,7 +654,7 @@ class Patches(dict):
             list of integers as indices.  
         '''
         rng = default_rng()
-        idxs = rng.choice(self.points.shape[0], n_points, replace = False)
+        idxs = self.xp.sort(rng.choice(self.points.shape[0], n_points, replace = False))
         return self.select_by_indices(idxs)
     
     def sort_by_feature(self, feature = None, ife = None):
@@ -662,7 +665,7 @@ class Patches(dict):
         ----------  
         ife : int  
             index of feature to be used for sorting. The features are accessed from  the current instance of patches  
-        feature : np.ndarray  
+        feature : self.xp.ndarray  
             array with shape (n_pts,). If provided separately, ife will be ignored.  
         
         '''  
@@ -673,7 +676,7 @@ class Patches(dict):
             if feature.ndim != 1: raise ValueError("feature must be 1D array")
             if len(feature) != len(self.points): raise ValueError("length of feature array must match number of patch points")
         
-        idxs = np.argsort(feature)
+        idxs = self.xp.argsort(feature)
         
         return self.select_by_indices(idxs)
     
@@ -689,7 +692,7 @@ class Patches(dict):
             plane at which index (along given axis)  
         '''
     
-        condlist = np.zeros((len(self.points), 2))
+        condlist = self.xp.zeros((len(self.points), 2))
         condlist[:,0] = plane_idx > self.points[:, plane_axis] # plane_idx is greater than the min corner point
         condlist[:,1] = plane_idx < self.points[:, plane_axis] + self.widths[:, plane_axis] # plane_idx is smaller than the max corner pt
         
@@ -705,7 +708,7 @@ class Patches(dict):
         ----------  
         ife : int  
             index of feature to be used for sorting. The features are accessed from  the current instance of patches  
-        feature : np.ndarray  
+        feature : self.xp.ndarray  
             array with shape (n_pts,). If provided separately, ife will be ignored.  
         
         selection_by : str  
@@ -719,7 +722,7 @@ class Patches(dict):
             if feature.ndim != 1: raise ValueError("feature must be 1D array")
             if len(feature) != len(self.points): raise ValueError("length of feature array must match number of patch points")
         
-        idxs = np.argsort(feature)
+        idxs = self.xp.argsort(feature)
         n_selections = min(n_selections, len(self.points))
             
         if selection_by == "highest":
@@ -729,11 +732,11 @@ class Patches(dict):
         return self.select_by_indices(idxs)
         
     def _calc_binning(self, patch_size):        
-        bin_vals = self.widths//np.asarray(patch_size)
+        bin_vals = self.widths//self.xp.asarray(patch_size)
         
-        cond1 = np.sum(np.max(bin_vals, axis = 1) != np.min(bin_vals, axis = 1)) > 0
-        cond2 = np.any(bin_vals == 0)
-        cond3 = np.any(self.widths%np.asarray(patch_size))
+        cond1 = self.xp.sum(self.xp.max(bin_vals, axis = 1) != self.xp.min(bin_vals, axis = 1)) > 0
+        cond2 = self.xp.any(bin_vals == 0)
+        cond3 = self.xp.any(self.widths%self.xp.asarray(patch_size))
         
         if cond1: # binning is assumed to be isotropic so aspect ratio must be preserved
             raise ValueError("aspect ratios of some patches don't match!! Cannot bin to patch_size")
@@ -749,7 +752,7 @@ class Patches(dict):
         
         Returns
         -------
-        np.ndarray  
+        self.xp.ndarray  
             shape is (n_pts, patch_z, patch_y, patch_x)  
         
         '''  
@@ -778,7 +781,7 @@ class Patches(dict):
             return xp.asarray(sub_vols, dtype = vol.dtype)
     
     
-    def fill_patches_in_volume(self, sub_vols, vol_out, TIMEIT = False):
+    def _fill_patches_in_volume_debug(self, sub_vols, vol_out, TIMEIT = False):
         
         '''
         to-do: Test cases: a volume full of ones may be assigned a list of sub_vols of zeroes 
@@ -803,9 +806,20 @@ class Patches(dict):
         if TIMEIT:
             print("TIME PER UNIT PATCH fill_patches_in_volume: %.2f ms"%t_tot)
         return
+
+    
+    def fill_patches_in_volume(self, sub_vols, vol_out):
         
-        # should I return the volume?    
+        '''
+        fill patches in volume or image (3d or 2d patches)
+        '''
         
+        s = self.slices()
+        for idx in range(len(self)):
+                vol_out[tuple(s[idx,...])] = sub_vols[idx]
+            
+        return
+    
     
     def plot_3D_feature(self, ife, ax, plot_type = 'centers'):
 
@@ -832,53 +846,6 @@ class Patches(dict):
         sub_vols = UpSampling3D(upsampling_fac)(sub_vols)
         return sub_vols, self.rescale(upsampling_fac, new_vol_shape = new_vol_shape)
 
-        
-        
-#     ######## CONSIDERING REMOVING THE CODE BELOW ###############
-#     def stitch(self, sub_vols, patch_size, upsample = False):
-#         '''  
-#         Stitches the big volume from a list of volume patches (with upsampling).    
-        
-#         Returns
-#         -------
-#         np.ndarray  
-#             shape is (n_pts, patch_z, patch_y, patch_x)  
-        
-#         '''  
-#         _ndim = len(self.vol_shape)
-#         if sub_vols.shape[0] != len(self.points):
-#             raise ValueError("number of patch points and length of input list of patches must match")
-#         vol = np.zeros(self.vol_shape, dtype = sub_vols.dtype)
-        
-#         # calculate binning
-#         bin_vals = self._calc_binning(patch_size)
-#         # make a list of slices
-#         s = self.slices()
-        
-#         if _ndim == 3:
-#             # set gpu for upsampling
-#             gpus = tf.config.experimental.list_physical_devices('GPU')
-#             if gpus:
-#                 try:
-#                     mem_limit = 4*np.prod(patch_size)*np.max(bin_vals)**3*1.5/1.0e6
-#                     tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=mem_limit)])
-#                 except RuntimeError as e:
-#                     print(e)        
-            
-#             for ii in range(len(self.points)):
-#                 vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
-#                 vol_out = UpSampling3D(size = tuple([bin_vals[ii]]*3))(vol_out)
-#                 vol_out = vol_out[0,...,0]
-#                 vol[s[ii,0],s[ii,1],s[ii,2]] = vol_out
-
-#         elif _ndim == 2:
-#             for ii in range(len(self.points)):
-#                 vol_out = sub_vols[ii].copy()[np.newaxis,...,np.newaxis]
-#                 vol_out = cv2.resize(vol_out, (patch_size[1], patch_size[0]))
-#                 vol_out = vol_out[0,...,0]
-#                 vol[s[ii,0],s[ii,1]] = vol_out
-            
-#         return vol
 
         
         

@@ -15,6 +15,21 @@ import tomocg as pt
 import os
 
 
+# def fast_pad(vol, padding, padding_z):
+
+#     new_vol = []
+    
+#     while True:
+#         img, vol = pad_one(vol, padding)
+#         new_vol.append()
+
+# def pad_one(vol, padding):
+#     img = vol[0]
+    
+#     img = cp.pad(cp.array(img), ((padding,padding),(padding,padding))).get()
+#     return img, vol[1:] if vol[1:].shape[0] > 0 else None
+    
+
 def get_projections(vol, theta, center, pnz):
     
     print("vol shape for projection compute", vol.shape)
@@ -28,6 +43,7 @@ def get_projections(vol, theta, center, pnz):
     proj_h = vol.shape[0]
     tot_ht = int(np.ceil(proj_h/(2*pnz))*(2*pnz)) 
     padding_z = int(tot_ht - proj_h)
+    
     
     vol = np.pad(vol, ((0,padding_z),\
                        (padding,padding),\

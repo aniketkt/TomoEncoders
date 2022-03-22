@@ -167,14 +167,10 @@ def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TI
         t04 = time.time()
         copy_from_times.append(t04 - t03)
     
-#     print("copy to gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_to_times)*1000.0))
-#     print("processing time per %i size chunk: %.2f ms"%(chunk_size,np.mean(proc_times)*1000.0))
-#     print("copy from gpu time per %i size chunk: %.2f ms"%(chunk_size,np.mean(copy_from_times)*1000.0))
-#     print("total time: ", time.time() - t0)
     if TIMEIT:
-        return vol, float(time.time() - t0)
-    else:
-        return vol
+        print(f"time for normalizing volume: {float(time.time() - t0):.2f} secs")
+    
+    return vol
 
 def _edge_map(Y):
 
