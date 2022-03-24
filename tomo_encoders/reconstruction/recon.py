@@ -11,7 +11,7 @@ import time
 import h5py
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
-from cupy.fft import rfft, irfft, rfftfreq
+from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
 from tomo_encoders import Patches
 
 def darkflat_correction(data, dark, flat):
@@ -208,6 +208,41 @@ def rec_pts_xy(data, theta, center, pts):
     return obj
     
 
+def extract_from_mask(obj_mask, cpts):
+    
+    start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+    stream = cp.cuda.Stream()
+    with stream:
+        
+        sub_vols = []
+        for idx in range(len(cpts)):
+            s = (slice(cpts[idx,0], cpts[idx,0] + 32), \
+                 slice(cpts[idx,1], cpts[idx,1] + 32), \
+                 slice(cpts[idx,2], cpts[idx,2] + 32))
+            sub_vols.append(obj_mask[s].get())
+        stream.synchronize()
+    end_gpu.record(); end_gpu.synchronize(); t_gpu2cpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+    print(f"overhead for extracting sub_vols to cpu: {t_gpu2cpu:.2f} ms")        
+    
+    return sub_vols, t_gpu2cpu
+    
+    
+def make_mask(obj_mask, corner_pts):
+    # MAKE OBJ_MASK FROM PATCH COORDINATES
+    start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+    stream = cp.cuda.Stream()
+    with stream:
+        obj_mask.put(cp.arange(obj_mask.size),cp.zeros(obj_mask.size, dtype='float32'))    
+        for idx in range(len(corner_pts)):
+            s = (slice(corner_pts[idx,0], corner_pts[idx,0] + 32), \
+                 slice(corner_pts[idx,1], corner_pts[idx,1] + 32), \
+                 slice(corner_pts[idx,2], corner_pts[idx,2] + 32))
+            obj_mask[s] = cp.ones((32, 32, 32), dtype = 'float32')
+        stream.synchronize()
+    end_gpu.record(); end_gpu.synchronize(); t_meas = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+    print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
+    return t_meas
+    
     
 def rec_mask(obj, data, theta, center):
     """Reconstruct mask on GPU"""
@@ -232,7 +267,7 @@ def rec_mask(obj, data, theta, center):
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
-    print("TIME rec_patch: %.2f ms"%t_gpu)
+    print("TIME rec_mask: %.2f ms"%t_gpu)
     return t_gpu
     
     
@@ -273,37 +308,46 @@ def _msg_exec_time(self, func, t_exec):
     return
 
 
+def calc_padding(data_shape):
+    # padding, make sure the width of projection is divisible by four after padding
+    [ntheta, nz, n] = data_shape
+    n_pad = n*(1 + 0.25*2) # 1/4 padding
+    n_pad = int(np.ceil(n_pad/8.0)*8.0) 
+    pad_left = int((n_pad - n)//2)
+    pad_right = n_pad - n - pad_left    
+    
+    print(f'n: {n}, n_pad: {n_pad}')
+    print(f'pad_left: {pad_left}, pad_right: {pad_right}')    
+    return pad_left, pad_right
+
 def fbp_filter(data, TIMEIT = False):
     """FBP filtering of projections"""
     
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
-    stream_fbp = cp.cuda.Stream()
     
-    with stream_fbp:
-        
-        
-        # padding, make sure the width of projection is divisible by four after padding
-        proj_w = data.shape[-1]
-        tot_width = proj_w*(1 + 0.25*2) # 1/4 padding
-        tot_width = int(np.ceil(tot_width/8.0)*8.0) 
-        padding = int((tot_width - proj_w)//2)
-        padding_right = tot_width - data.shape[-1] - padding
-#         print(f'padding: {padding}; padding_right: {padding}')
-        data = cp.pad(data, ((0,0),(0,0),(padding, padding_right)), mode = 'edge')
+    pad_left, pad_right = calc_padding(data.shape)    
+    # padding
+    data_padded = cp.pad(data, ((0,0),(0,0),(pad_left, pad_right)), mode = 'edge')
+
+    # fft plan
+    plan_fwd = get_fft_plan(data_padded, axes=2, value_type='R2C')
+    plan_inv = get_fft_plan(rfft(data_padded,axis=2), axes=2, value_type='C2R')
+    
+    with plan_fwd:
 
         # filter mask
-        t = rfftfreq(data.shape[2])
+        t = rfftfreq(data_padded.shape[2])
         wfilter = t.astype(cp.float32) #* (1 - t * 2)**3  # parzen
+
+        # fft
+        data0 = wfilter*rfft(data_padded, axis=2)
+
+    with plan_inv:
+        # inverse fft
+        data[:] = irfft(data0, axis=2)[...,pad_left:-pad_right]
         
-        for k in range(data.shape[0]):
-            data[k] = irfft(wfilter*rfft(data[k], axis=1), axis=1)
-        
-        # unpadding
-        data = data[...,padding:-padding_right].copy()
-        stream_fbp.synchronize()
-    
     end_gpu.record()
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
@@ -311,7 +355,7 @@ def fbp_filter(data, TIMEIT = False):
     if TIMEIT:
         print("TIME fbp_filter: %.2f ms"%t_gpu)
     
-    return data
+    return t_gpu
 
 
 
