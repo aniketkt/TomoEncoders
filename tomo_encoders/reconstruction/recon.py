@@ -12,7 +12,7 @@ import h5py
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
 from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
-from tomo_encoders import Patches
+from tomo_encoders import Patches, Grid
 
 def darkflat_correction(data, dark, flat):
     """Dark-flat field correction"""
@@ -222,7 +222,7 @@ def extract_from_mask(obj_mask, cpts):
             sub_vols.append(obj_mask[s].get())
         stream.synchronize()
     end_gpu.record(); end_gpu.synchronize(); t_gpu2cpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
-    print(f"overhead for extracting sub_vols to cpu: {t_gpu2cpu:.2f} ms")        
+    # print(f"overhead for extracting sub_vols to cpu: {t_gpu2cpu:.2f} ms")        
     
     return sub_vols, t_gpu2cpu
     
@@ -240,10 +240,10 @@ def make_mask(obj_mask, corner_pts):
             obj_mask[s] = cp.ones((32, 32, 32), dtype = 'float32')
         stream.synchronize()
     end_gpu.record(); end_gpu.synchronize(); t_meas = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
-    print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
+    # print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
     return t_meas
     
-    
+
 def rec_mask(obj, data, theta, center):
     """Reconstruct mask on GPU"""
     [ntheta, nz, n] = data.shape
@@ -267,7 +267,7 @@ def rec_mask(obj, data, theta, center):
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
-    print("TIME rec_mask: %.2f ms"%t_gpu)
+    # print("TIME rec_mask: %.2f ms"%t_gpu)
     return t_gpu
     
     
@@ -316,8 +316,8 @@ def calc_padding(data_shape):
     pad_left = int((n_pad - n)//2)
     pad_right = n_pad - n - pad_left    
     
-    print(f'n: {n}, n_pad: {n_pad}')
-    print(f'pad_left: {pad_left}, pad_right: {pad_right}')    
+    # print(f'n: {n}, n_pad: {n_pad}')
+    # print(f'pad_left: {pad_left}, pad_right: {pad_right}')    
     return pad_left, pad_right
 
 def fbp_filter(data, TIMEIT = False):
@@ -402,7 +402,7 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
         stream_copy.synchronize()
     
     if apply_fbp:
-        data = fbp_filter(data) # need to apply filter to full projection  
+        fbp_filter(data) # need to apply filter to full projection  
         
     # st* - start, p* - number of points
     stz, sty, stx = (0,0,0)
@@ -427,6 +427,60 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
         return obj, t_gpu
     else:
         return obj
+
+
+def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False):
+
+    z_pts = np.unique(p3d.points[:,0])
+
+    ntheta, nc, n = projs.shape[0], p3d.wd, projs.shape[2]
+    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
+    theta = cp.array(theta, dtype = cp.float32)
+    center = cp.float32(center)
+    obj_mask = cp.empty((nc, n, n), dtype = cp.float32)
+    x = []
+    times = []
+    cpts_all = []
+    for z_pt in z_pts:
+        cpts = p3d.filter_by_condition(p3d.points[:,0] == z_pt).points
+        cpts_all.append(cpts.copy())
+        cpts[:,0] = 0
+        
+        # COPY DATA TO GPU
+        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+        stream = cp.cuda.Stream()
+        with stream:
+            data.set(projs[:,z_pt:z_pt+nc,:])
+        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+        # print(f"overhead for copying data to gpu: {t_cpu2gpu:.2f} ms")            
+            
+        # FBP FILTER
+        if apply_fbp:
+            t_filt = fbp_filter(data)
+        
+        # BACK-PROJECTION
+        t_mask = make_mask(obj_mask, cpts)
+        t_rec = rec_mask(obj_mask, data, theta, center)
+        
+        # EXTRACT PATCHES AND SEND TO CPU
+        xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts)
+        times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
+        x.append(xchunk)
+
+    del obj_mask, data, theta, center    
+    cp._default_memory_pool.free_all_blocks()    
+    
+    cpts_all = np.concatenate(cpts_all, axis = 0)
+    x = np.concatenate(x, axis = 0)
+    x = np.asarray(x).reshape(-1,p3d.wd,p3d.wd,p3d.wd)
+    
+    p3d = Grid(p3d.vol_shape, initialize_by = "data", \
+               points = cpts_all, width = p3d.wd)
+    if TIMEIT:
+        return x, p3d, np.asarray(times)
+    else:
+        return x, p3d
+
 
 def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False):
     '''
@@ -487,9 +541,8 @@ def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False
     
     if TIMEIT:
         print("TIME reconstruct 3D patches: %.2f seconds"%(t_gpu/1000.0))
-        return sub_vols, p3d_new, t_gpu
-    else:
-        return sub_vols, p3d_new
+        
+    return sub_vols, p3d_new
     
 def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
     
@@ -528,7 +581,7 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
         stream_copy.synchronize()
     
     if apply_fbp:
-        data = fbp_filter(data) # need to apply filter to full projection  
+        fbp_filter(data) # need to apply filter to full projection  
 
     # st* - start, p* - number of points
     stz = 0
@@ -557,62 +610,6 @@ def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
     return sub_vols
 
 
-def recon_chunk2(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
-    
-    '''
-    reconstruct a region within full volume defined by 2d patches with corner points (y, x) and widths (wy, wx) and a height  
-    
-    Parameters
-    ----------
-    projs : np.ndarray  
-        array of projection images shaped as ntheta, nrows, ncols
-    theta : np.ndarray
-        array of theta values (length = ntheta)  
-    center : float  
-        center value for the projection data  
-    p2d : Patches  
-        patches (2d) on a given slice
-    
-    Returns
-    -------
-    
-    '''
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-
-    device = cp.cuda.Device()
-    memory_pool = cp.cuda.MemoryPool()
-    cp.cuda.set_allocator(memory_pool.malloc)
-    
-    stream_copy = cp.cuda.Stream()
-    with stream_copy:
-        data = cp.array(projs)
-        center = cp.float32(center)    
-        theta = cp.array(theta, dtype = 'float32')
-        stream_copy.synchronize()
-    
-    if apply_fbp:
-        data = fbp_filter(data) # need to apply filter to full projection  
-
-        
-
-    # INSERT CODE HERE
-        
-    sub_vols = np.asarray(sub_vols)
-
-    device.synchronize()
-#     print('total bytes: ', memory_pool.total_bytes())    
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        print("TIME reconstruct z-chunk: %.2f seconds"%(t_gpu/1000.0))
-    
-    return sub_vols
 
 
 
