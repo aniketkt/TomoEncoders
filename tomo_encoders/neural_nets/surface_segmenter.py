@@ -32,7 +32,6 @@ MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if coun
 
 from tomo_encoders.neural_nets.keras_processor import Vox2VoxProcessor_fCNN
 from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
-from tomo_encoders.rw_utils.data_pairs import read_data_pair, load_dataset_pairs
 from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
 
 

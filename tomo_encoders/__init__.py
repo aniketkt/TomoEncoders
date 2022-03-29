@@ -10,6 +10,6 @@ from tomo_encoders.structures.grid import Grid
 from tomo_encoders.structures.datafile import DataFile
 from tomo_encoders.misc import viewer
 from tomo_encoders.misc import voxel_processing
-
+from tomo_encoders import mesh_processing
 
 
