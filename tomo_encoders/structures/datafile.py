@@ -358,7 +358,7 @@ class DataFile():
         with h5py.File(self.fname, 'r') as hf:
             return np.asarray(hf[self.data_tag][idxs,...])
     
-    def read_chunk(self, axis = None, slice_start = None, chunk_shape = None, max_GB = 10.0, slice_end = "", skip_fac = None):
+    def read_chunk(self, axis = None, slice_start = None, chunk_shape = None, max_GB = 10.0, slice_end = "", skip_fac = None, return_slice = True):
         """Read a chunk of data along a given axis.  
         
         Parameters
@@ -413,7 +413,10 @@ class DataFile():
                 elif axis == 2:
                     ch = np.asarray(hf[self.data_tag][:,:,s])
                 ch = np.moveaxis(ch, axis, 0)
-            return ch, s
+            if return_slice:
+                return ch, s
+            else:
+                return ch
         
         else: # in tiff mode
             if axis != 0: raise ValueError("TIFF data format does not support multi-axial slicing.")
@@ -421,7 +424,10 @@ class DataFile():
             _message("Reading tiff: %s, axis %i,  %s, chunk_shape: %s"%(self.fname.split('/')[-1],\
                                                                         axis, s, chunk_shape), self.VERBOSITY > 1)    
             ch = np.asarray(read_tiffseq(self.fname, s = s))
-            return ch, s
+            if return_slice:
+                return ch, s
+            else:
+                return ch
 
     def read_full(self, skip_fac = None):
         """Read the full dataset

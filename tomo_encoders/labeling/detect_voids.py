@@ -22,14 +22,14 @@ def calc_patch_size(base_size, multiplier):
     output = np.round(output).astype(np.uint32)
     return tuple(output)
 
-def export_voids(vol_seg, n_max_detect, TIMEIT = False):
+def export_voids(vol_seg, n_max_detect, TIMEIT = False, invert = True):
     '''
     '''
     
     assert vol_seg.dtype == 'uint8', "vol_seg must be uint8"
     
     t0 = time.time()
-    vol_lab, n_detected,  = label_np(vol_seg^1)
+    vol_lab, n_detected,  = label_np(vol_seg^1 if invert else vol_seg)
     s_voids = find_objects(vol_lab)
     print("Total voids detected: %i"%n_detected)
     

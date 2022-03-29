@@ -27,8 +27,7 @@ from tensorflow.keras.layers import UpSampling3D
 
 class Grid(dict):
     
-    def __init__(self, vol_shape, initialize_by = "grid-params", \
-                 features = None, names = [], xp = np, **kwargs):
+    def __init__(self, vol_shape, initialize_by = "grid-params", xp = np, **kwargs):
         '''
         A patch is the set of all pixels in a rectangle / cuboid sampled from a (big) image / volume. The Patches data structure allows the following. Think of this as a pandas DataFrame. Each row stores coordinates and features corresponding to a new patch constrained within a big volume of shape vol_shape.  
         
