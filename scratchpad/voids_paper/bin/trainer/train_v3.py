@@ -13,6 +13,7 @@ import time
 
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
 from tomo_encoders.misc.feature_maps_vis import view_midplanes
+from tomo_encoders.reconstruction.recon import recon_binning
 
 ######## START GPU SETTINGS ############
 ########## SET MEMORY GROWTH to True ############
@@ -51,12 +52,21 @@ def infer(fe, Xs, Ys):
 
 if __name__ == "__main__":
 
-    ds1 = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/train_x', tiff = True)
-    ds2 = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/train_x_rec', tiff = True)
-    Xs = []
-    Xs.append(ds1.read_full())
-    Xs.append(ds2.read_full())
-    Ys = [DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/train_y', tiff = True).read_full()]
+    
+    Vy_full = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/train_y', tiff = True).read_full()
+
+    hf = h5py.File('/data02/MyArchive/aisteer_3Dencoders/tmp_data/projs_2k.hdf5', 'r')
+    projs = np.asarray(hf["data"][:])
+    theta = np.asarray(hf['theta'][:])
+    center = float(np.asarray(hf["center"]))
+    hf.close()
+
+    Vx_full = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/train_x', tiff = True).read_full()
+    Vx_bin4s = [recon_binning(projs, theta, center, b_K, 4) for b_K in [4,6,8]]    
+    Vx_bin2s = [recon_binning(projs, theta, center, b_K, 2) for b_K in [2,4,8]]    
+
+
+    
 
     
     # item_list = [((32,32,32), "M_a07"), ((32,32,32), "M_a02")]

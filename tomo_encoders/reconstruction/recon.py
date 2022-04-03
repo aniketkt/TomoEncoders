@@ -208,7 +208,7 @@ def rec_pts_xy(data, theta, center, pts):
     return obj
     
 
-def extract_from_mask(obj_mask, cpts):
+def extract_from_mask(obj_mask, cpts, wd):
     
     start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
     stream = cp.cuda.Stream()
@@ -216,9 +216,9 @@ def extract_from_mask(obj_mask, cpts):
         
         sub_vols = []
         for idx in range(len(cpts)):
-            s = (slice(cpts[idx,0], cpts[idx,0] + 32), \
-                 slice(cpts[idx,1], cpts[idx,1] + 32), \
-                 slice(cpts[idx,2], cpts[idx,2] + 32))
+            s = (slice(cpts[idx,0], cpts[idx,0] + wd), \
+                 slice(cpts[idx,1], cpts[idx,1] + wd), \
+                 slice(cpts[idx,2], cpts[idx,2] + wd))
             sub_vols.append(obj_mask[s].get())
         stream.synchronize()
     end_gpu.record(); end_gpu.synchronize(); t_gpu2cpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
@@ -227,17 +227,17 @@ def extract_from_mask(obj_mask, cpts):
     return sub_vols, t_gpu2cpu
     
     
-def make_mask(obj_mask, corner_pts):
+def make_mask(obj_mask, corner_pts, wd):
     # MAKE OBJ_MASK FROM PATCH COORDINATES
     start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
     stream = cp.cuda.Stream()
     with stream:
         obj_mask.put(cp.arange(obj_mask.size),cp.zeros(obj_mask.size, dtype='float32'))    
         for idx in range(len(corner_pts)):
-            s = (slice(corner_pts[idx,0], corner_pts[idx,0] + 32), \
-                 slice(corner_pts[idx,1], corner_pts[idx,1] + 32), \
-                 slice(corner_pts[idx,2], corner_pts[idx,2] + 32))
-            obj_mask[s] = cp.ones((32, 32, 32), dtype = 'float32')
+            s = (slice(corner_pts[idx,0], corner_pts[idx,0] + wd), \
+                 slice(corner_pts[idx,1], corner_pts[idx,1] + wd), \
+                 slice(corner_pts[idx,2], corner_pts[idx,2] + wd))
+            obj_mask[s] = cp.ones((wd, wd, wd), dtype = 'float32')
         stream.synchronize()
     end_gpu.record(); end_gpu.synchronize(); t_meas = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
     # print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
@@ -359,7 +359,7 @@ def fbp_filter(data, TIMEIT = False):
 
 
 
-def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, apply_fbp = True, TIMEIT = False):
+def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False):
     
     '''
     reconstruct with binning projections and theta
@@ -384,7 +384,6 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
     
     '''
     
-    
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
@@ -395,9 +394,17 @@ def recon_binning(projs, theta, center, theta_binning, z_binning, col_binning, a
     
     stream_copy = cp.cuda.Stream()
     with stream_copy:
-        data = cp.array(projs[::theta_binning, ::z_binning, ::col_binning].copy())
-        theta = cp.array(theta[::theta_binning], dtype = 'float32')
-        center = cp.float32(center/col_binning)
+        [_, nz, n] = projs.shape
+        
+        # option 1: average pooling
+        projs = projs[::b_K].copy()
+        data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
+        # option 2: simple binning
+        # data = cp.array(projs[::b_K, ::b, ::b].copy())
+
+        # theta and center
+        theta = cp.array(theta[::b_K], dtype = 'float32')
+        center = cp.float32(center/b)
         vol_shape = (data.shape[1], data.shape[2], data.shape[2])
         stream_copy.synchronize()
     
@@ -459,11 +466,11 @@ def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = Fal
             t_filt = fbp_filter(data)
         
         # BACK-PROJECTION
-        t_mask = make_mask(obj_mask, cpts)
+        t_mask = make_mask(obj_mask, cpts, p3d.wd)
         t_rec = rec_mask(obj_mask, data, theta, center)
         
         # EXTRACT PATCHES AND SEND TO CPU
-        xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts)
+        xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
         times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
         x.append(xchunk)
 

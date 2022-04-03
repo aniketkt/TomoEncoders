@@ -83,6 +83,10 @@ def get_model_params(model_tag):
         model_params["n_filters"] = [8, 16]
         model_params["pool_size"] = [ 2,  4]
 
+    elif model_tag == "M_a08":
+        model_params["n_filters"] = [8, 16, 32]
+        model_params["pool_size"] = [ 2, 2,  2]
+    
     else:
         raise ValueError("model_tag not found")
         

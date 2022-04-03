@@ -12,18 +12,19 @@ import time
 import seaborn as sns
 import pandas as pd
 
-sys.path.append('/data02/MyArchive/aisteer_3Dencoders/TomoEncoders/scratchpad/voids_paper/configs/')
-from tomo_encoders import Patches
+sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs/')
+from tomo_encoders import Grid
 from tomo_encoders.misc import viewer
 from tomo_encoders import DataFile
 import cupy as cp
 from tomo_encoders.reconstruction.project import get_projections
-from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d
+from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d, recon_patches_3d_2
 from tomo_encoders.misc.voxel_processing import cylindrical_mask, normalize_volume_gpu
 from params import model_path, get_model_params
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
 import tensorflow as tf
-from cupyx.scipy.ndimage import zoom
+# from cupyx.scipy.ndimage import zoom
+from skimage.filters import threshold_otsu
 
 ######## START GPU SETTINGS ############
 ########## SET MEMORY GROWTH to True ############
@@ -35,83 +36,126 @@ except:
     pass        
 ######### END GPU SETTINGS ############
 
+model_tag = "M_a07"
+model_names = {"segmenter" : "segmenter_Unet_%s"%model_tag}
+model_params = get_model_params(model_tag)
+# patch size
+wd = 32
+# guess surface parameters
+b = 4
+b_K = 4
+sparse_flag = True
 
+
+def guess_surface(projs, theta, center, b, b_K, wd):
+    ## P-GUESS ##
+    # reconstruction
+    V_bin = recon_binning(projs, theta, center, b_K, b)    
+    # segmentation
+    
+    thresh = threshold_otsu(V_bin.reshape(-1))
+    V_bin[:] = (V_bin < thresh).astype(np.uint8)
+    
+    # min_max = V_bin.min(), V_bin.max()
+    # p3d_bin = Grid(V_bin.shape, width = wd)
+    # x = p3d_bin.extract(V_bin) # effectively 128^3 patches in a full volume
+    # x = fe.predict_patches("segmenter", x[...,np.newaxis], 256, None, min_max = min_max)[...,0]
+    # p3d_bin.fill_patches_in_volume(x, V_bin)
+
+    # find patches on surface
+    wdb = int(wd//b)
+    p3d = Grid(V_bin.shape, width = wdb)
+    x = p3d.extract(V_bin)
+
+    is_surf = np.std(x, axis = (1,2,3)) > 0.0
+    is_ones = np.sum(x, axis = (1,2,3))/(wdb**3) == 1
+    is_zeros = np.sum(x, axis = (1,2,3))/(wdb**3) == 0
+    is_cyl = p3d._is_within_cylindrical_crop(0.98, 1.0)
+    
+    p3d = p3d.rescale(b)
+    p3d_surf = p3d.filter_by_condition(is_surf & is_cyl)
+    p3d_ones = p3d.filter_by_condition(is_ones | (~is_cyl))
+    p3d_zeros = p3d.filter_by_condition(is_zeros)
+
+    return p3d_surf, p3d_ones, p3d_zeros
+    
+
+
+def determine_surface(projs, theta, center, fe, p_surf, p_zeros):
+
+    # allocate binary volume
+    Vp = np.ones(p_surf.vol_shape, dtype=np.uint8)
+
+    # assign zeros in the metal region; the void region will be left with ones
+    if p_zeros is not None:
+        s = p_zeros.slices()
+        for i in range(len(p_zeros)):
+            Vp[tuple(s[i])] = 0.0
+    
+    # reconstruct patches on the surface
+    start_rec = cp.cuda.Event(); end_rec = cp.cuda.Event(); start_rec.record()
+    x_surf, p_surf = recon_patches_3d_2(projs, theta, center, p_surf, apply_fbp =True)
+    end_rec.record(); end_rec.synchronize(); t_rec_surf = cp.cuda.get_elapsed_time(start_rec,end_rec)
+    # segment patches on the surface
+    t_start_seg = time.time()
+    min_max = x_surf[:,::4,::4,::4].min(), x_surf[:,::4,::4,::4].max()
+    x_surf = fe.predict_patches("segmenter", x_surf[...,np.newaxis], 256, None, min_max = min_max)[...,0]
+    p_surf.fill_patches_in_volume(x_surf, Vp)    
+    t_start_seg = time.time() - t_start_seg
+    print(f"\t TIME: reconstruction - {t_rec_surf/1000.0:.2f} secs; segmentation - {t_start_seg:.2f} secs")
+    # print(f'total patches reconstructed and segmented around surface: {len(p_surf)}')    
+    eff = len(p_surf)*(wd**3)/np.prod(Vp.shape)
+    print(f"\t STAT: r value: {eff*100.0:.2f}")        
+    return Vp
 
 
 if __name__ == "__main__":
 
-    
+
+    # initialize segmenter fCNN
+    fe = SurfaceSegmenter(model_initialization = 'load-model', \
+                         model_names = model_names, \
+                         model_path = model_path)    
+    fe.test_speeds(128,n_reps = 5, input_size = (wd,wd,wd))    
+
+    # read data and initialize output arrays
+    ## to-do: ensure reconstructed object has dimensions that are a multiple of the (wd,wd,wd) !!    
     hf = h5py.File('/data02/MyArchive/aisteer_3Dencoders/tmp_data/projs_2k.hdf5', 'r')
     projs = np.asarray(hf["data"][:])
     theta = np.asarray(hf['theta'][:])
     center = float(np.asarray(hf["center"]))
     hf.close()
-    VOL_SHAPE = (projs.shape[1], projs.shape[2], projs.shape[2])
-    Vp = np.ones(VOL_SHAPE, dtype=np.uint8)
-    Vp_mask = np.zeros(VOL_SHAPE, dtype = np.uint8)
 
+    # make sure projection shapes are divisible by the patch width (both binning and full steps)
+    print(f'SHAPE OF PROJECTION DATA: {projs.shape}')
     
-    t000 = time.time()
-    Vx_bin = recon_binning(projs, theta, center, 4, 4, 4)    
-    model_tag = "M_a07"
-    model_names = {"segmenter" : "segmenter_Unet_%s"%model_tag}
-    model_params = get_model_params(model_tag)
+    ##### BEGIN ALGORITHM ########
+    # guess surface
+    print("STEP: guess surface")
+    start_guess = cp.cuda.Event(); end_guess = cp.cuda.Event(); start_guess.record()
+    if sparse_flag:
+        p_surf, p_ones, p_zeros = guess_surface(projs, theta, center, b, b_K, wd)
+    else:
+        p_surf = Grid((projs.shape[1], projs.shape[2], projs.shape[2]), width = wd)
+        p_ones = None
+        p_zeros = None
+    end_guess.record(); end_guess.synchronize(); t_guess = cp.cuda.get_elapsed_time(start_guess,end_guess)
+    print(f'TIME: guessing neighborhood of surface: {t_guess/1000.0:.2f} seconds')
 
-    fe = SurfaceSegmenter(model_initialization = 'load-model', \
-                         model_names = model_names, \
-                         model_path = model_path)    
-    fe.test_speeds(128,n_reps = 5, input_size = (32,32,32))    
-    
-    t00 = time.time()
-    ## ASSUMES v has dimensions that are a multiple of the patch_size !!
-    min_max = Vx_bin.min(), Vx_bin.max()
+    # determine surface
+    print("STEP: determine surface")
+    start_determine = cp.cuda.Event(); end_determine = cp.cuda.Event(); start_determine.record()
+    Vp = determine_surface(projs, theta, center, fe, p_surf, p_zeros)
+    end_determine.record(); end_determine.synchronize(); t_determine = cp.cuda.get_elapsed_time(start_determine,end_determine)
+    print(f'TIME: determining surface: {t_determine/1000.0:.2f} seconds')
 
-    p_sel = Patches(Vx_bin.shape, initialize_by='regular-grid', patch_size = (32,32,32))
-    x = p_sel.extract(Vx_bin, (32,32,32)) # effectively 128^3 patches in a full volume
-    x = fe.predict_patches("segmenter", x[...,np.newaxis], 256, None, min_max = min_max)[...,0]
-    x = np.asarray([zoom(cp.array(_x),4, mode = 'constant', order = 1).get() for _x in x])    
-    p_sel = p_sel.rescale(4, VOL_SHAPE)
-    print(f'upsampled x array shape {x.shape}')
-    p_sel.fill_patches_in_volume(x, Vp)
-    t11 = time.time()
-    print(f"time for segmentation: {(t11 - t00):.2f} seconds")    
-
-    # improve segmentation on the surface voxels
-    p_surf = Patches(VOL_SHAPE, initialize_by='regular-grid', patch_size=(32,32,32))
-    tot_patches = len(p_surf)
-    edge_mask = np.std(p_surf.extract(Vp,(8,8,8)),axis = (1,2,3)) > 0 # downsample by 4 to save time in computing np.std
-    p_surf = p_surf.filter_by_condition(edge_mask)
-    eff = len(p_surf)/tot_patches
-    print(f"voxels in the neighborhood of surface: {eff*100.0:.2f} pc of total")        
-    
-    t111 = time.time()
-    x_surf, p_surf = recon_patches_3d(projs, theta, center, p_surf, TIMEIT = True)
-    min_max = x_surf[:,::4,::4,::4].min(), x_surf[:,::4,::4,::4].max()
-    t00 = time.time()
-    x_surf = fe.predict_patches("segmenter", x_surf[...,np.newaxis], 256, None, min_max = min_max)[...,0]
-    print(f'total patches reconstructed and segmented around surface: {x_surf.shape}')    
-    print(f"time for segmentation: {(time.time() - t00):.2f} seconds")    
-    p_surf.fill_patches_in_volume(x_surf, Vp)    
-    p_surf.fill_patches_in_volume(np.ones((len(x_surf),32,32,32)), Vp_mask)
-    
-       
-    
-    t222 = time.time()
-    
-    print(f'TOTAL PROCESSING TIME: {t222-t000:.2f} secs')
-    print(f'FULL-RES PROCESSING TIME: {t222-t111:.2f} secs')
-    ds_save = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/test_y_pred', tiff = True, d_shape = Vp.shape, d_type = np.uint8)
+    # complete: save stuff    
+    ds_save = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/test_y_pred', tiff = True, d_shape = Vp.shape, d_type = np.uint8, VERBOSITY=0)
     ds_save.create_new(overwrite=True)
     ds_save.write_full(Vp)
-    
-    ds_save = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/test_y_surf', tiff = True, d_shape = Vp_mask.shape, d_type = np.uint8)
+    Vp_mask = np.zeros(p_surf.vol_shape, dtype = np.uint8) # Save for illustration purposes the guessed neighborhood of the surface
+    p_surf.fill_patches_in_volume(np.ones((len(p_surf),wd,wd,wd)), Vp_mask)
+    ds_save = DataFile('/data02/MyArchive/aisteer_3Dencoders/tmp_data/test_y_surf', tiff = True, d_shape = Vp_mask.shape, d_type = np.uint8, VERBOSITY=0)
     ds_save.create_new(overwrite=True)
     ds_save.write_full(Vp_mask)
-    
-    
-    
-    
-    
-    
-    
     
