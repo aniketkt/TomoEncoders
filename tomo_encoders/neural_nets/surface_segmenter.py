@@ -295,7 +295,53 @@ class SurfaceSegmenter(Vox2VoxProcessor_fCNN):
         
         return out_arr
     
+
+
+    def predict_patches_gpu(self, x, chunk_size):
+
+        '''
+        Predicts sub_vols with input from cupy using DLPack. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
+        
+        '''
+        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
+        
+        t0 = time.time()
+        nb = len(x)
+        nchunks = int(np.ceil(nb/chunk_size))
+        nb_padded = nchunks*chunk_size
+        padding = nb_padded - nb
+        min_val, max_val = x[:,::2,::2,::2].min(), x[:,::2,::2,::2].max()
+        x = _rescale_data(x, float(min_val), float(max_val))
+        if padding != 0:
+            x = cp.pad(x, ((0,padding), (0,0), (0,0), (0,0)), mode = 'edge')
             
+        for k in range(nchunks):
+            sb = slice(k*chunk_size , (k+1)*chunk_size)
+            x[sb,...] = self.models["segmenter"].predict(x[sb,...])
+        
+        if padding != 0:
+            x = x[:-padding,...]
+        
+        out_arr = np.round(out_arr).astype(np.uint8)
+        t_unit = (time.time() - t0)*1000.0
+        
+        return t_unit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             
     def _build_models(self, descriptor_tag = "misc", **model_params):
         '''

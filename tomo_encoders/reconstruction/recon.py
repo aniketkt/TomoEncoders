@@ -8,7 +8,7 @@
 import numpy as np
 import cupy as cp
 import time
-import h5py
+import tensorflow as tf
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
 from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
@@ -225,7 +225,68 @@ def extract_from_mask(obj_mask, cpts, wd):
     # print(f"overhead for extracting sub_vols to cpu: {t_gpu2cpu:.2f} ms")        
     
     return sub_vols, t_gpu2cpu
+
+
+def extract_segmented(obj_mask, cpts, wd, segmenter, batch_size):
     
+    ''' this is a chunk of reconstructed data along some z-chunk size (typically 32 or 64).
+    wd is 32 (patch width).
+    if total projection width is 2048, then we get 2*(2048/32)**2 = 8192 patches.
+    let's say we pick r = 0.05, we have 410 patches.
+    batch_size of 256 seems reasonable. recommended mapping
+    projection_width r             batch_size
+    2048             0.05 - 1.0    256
+    2048             0.01 - 0.05   128
+    1024             0.05 - 1.0    128
+    4096             0.01 - 1.0    256
+
+    '''
+    start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+    stream = cp.cuda.Stream()
+    yp = cp.empty((batch_size, wd, wd, wd, 1), dtype = cp.float32)
+    
+
+    with stream:
+        
+        sub_vols = []
+        t_seg = []
+        ib = 1
+        for idx in range(len(cpts)):
+            # print(r' %i '%ib, end = "")
+            s = (slice(cpts[idx,0], cpts[idx,0] + wd), \
+                 slice(cpts[idx,1], cpts[idx,1] + wd), \
+                 slice(cpts[idx,2], cpts[idx,2] + wd))
+            
+            yp[ib-1,..., 0] = obj_mask[s].copy()
+            batch_is_full = (ib == batch_size) # is batch full?
+            end_of_chunk = (idx == len(cpts) - 1) # are we at the end of the z-chunk?
+            if batch_is_full or end_of_chunk:
+                
+                st_seg = cp.cuda.Event(); end_seg = cp.cuda.Event(); st_seg.record()                
+                min_val = yp[:ib].min()
+                max_val = yp[:ib].max()
+                yp[:] = (yp - min_val) / (max_val - min_val)
+                
+                # use DLPack here as yp is cupy array                
+                # cap = yp.toDlpack()
+                # yp_tf = tf.experimental.dlpack.from_dlpack(cap)
+                yp_cpu = np.round(segmenter.models["segmenter"].predict(yp.get()))
+                end_seg.record(); end_seg.synchronize(); t_seg.append(cp.cuda.get_elapsed_time(st_seg,end_seg))
+                sub_vols.append(yp_cpu[:ib,...,0])
+                ib = 0
+            ib+=1
+            # print(f'sub_vols shape: {np.shape(sub_vols)}')
+            
+        stream.synchronize()
+    end_gpu.record(); end_gpu.synchronize(); t_gpu2cpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+    
+    sub_vols = np.concatenate(sub_vols, axis = 0)
+    t_seg = np.sum(t_seg)
+    t_gpu2cpu -= t_seg
+    # import pdb; pdb.set_trace()
+    print(f"voxel processing time for U-net: {t_seg/(np.prod(sub_vols.shape))*1e6:.2f} ns")
+    return sub_vols, t_gpu2cpu, t_seg
+
     
 def make_mask(obj_mask, corner_pts, wd):
     # MAKE OBJ_MASK FROM PATCH COORDINATES
@@ -353,7 +414,8 @@ def fbp_filter(data, TIMEIT = False):
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
     
     if TIMEIT:
-        print("TIME fbp_filter: %.2f ms"%t_gpu)
+        # print("TIME fbp_filter: %.2f ms"%t_gpu)
+        pass
     
     return t_gpu
 
@@ -436,7 +498,7 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         return obj
 
 
-def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False):
+def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False, segmenter = None, segmenter_batch_size = 256):
 
     z_pts = np.unique(p3d.points[:,0])
 
@@ -470,8 +532,17 @@ def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = Fal
         t_rec = rec_mask(obj_mask, data, theta, center)
         
         # EXTRACT PATCHES AND SEND TO CPU
-        xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
-        times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
+        if segmenter is not None:
+            # do segmentation
+            xchunk, t_gpu2cpu, t_seg = extract_segmented(obj_mask, cpts, p3d.wd, segmenter, segmenter_batch_size)
+            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu, t_seg])
+            pass
+        else:
+            xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
+            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
+        
+
+        # APPEND AND GO TO NEXT CHUNK
         x.append(xchunk)
 
     del obj_mask, data, theta, center    
@@ -479,7 +550,7 @@ def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = Fal
     
     cpts_all = np.concatenate(cpts_all, axis = 0)
     x = np.concatenate(x, axis = 0)
-    x = np.asarray(x).reshape(-1,p3d.wd,p3d.wd,p3d.wd)
+    
     
     p3d = Grid(p3d.vol_shape, initialize_by = "data", \
                points = cpts_all, width = p3d.wd)
@@ -489,132 +560,7 @@ def recon_patches_3d_2(projs, theta, center, p3d, apply_fbp = True, TIMEIT = Fal
         return x, p3d
 
 
-def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False):
-    '''
     
-    Assumes the patches are on a regular (non-overlapping) grid.  
-    '''
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    
-    vol_shape = p3d.vol_shape
-    cond0 = projs.shape[1] != vol_shape[0]
-    cond1 = projs.shape[-1] != vol_shape[1]
-    cond2 = projs.shape[-1] != vol_shape[2]
-    if any([cond0, cond1, cond2]):
-        raise ValueError("vol_shape and projections array are incompatible")
-    
-    # assume z-widths are all same
-    z_width = p3d.widths[0,0]
-    # assume no overlap between patches
-    z_points = p3d.points[:,0]
-    
-    p2d_sorted = Patches(tuple(vol_shape[1:]), initialize_by = "data", \
-                  points = p3d.points[:,1:], \
-                  widths = p3d.widths[:,1:])
-    p2d_sorted.add_features(z_points.reshape(-1,1), names = ["z_points"])
-    p2d_sorted = p2d_sorted.sort_by_feature(ife = 0) # sort in increasing z value
-    z_points_unique = np.unique(z_points)    
-
-    sub_vols = []
-    from tqdm import tqdm
-    print("reconstructing selected 3D patches", \
-          tuple(p3d.widths[0,...]), \
-          "along %i z-chunks"%len(z_points_unique))
-    for icount, z_point in enumerate(z_points_unique):
-        p2d_z = p2d_sorted.filter_by_condition(p2d_sorted.features[:,0] == z_point)
-#         print("index %i, number of patches: %i"%(z_point, len(p2d_z)))  
-        sub_vols.append(recon_chunk(projs[:,z_point:z_point+z_width,:], theta, center, p2d_z, apply_fbp = apply_fbp))
-        
-        widths_arr = np.concatenate([np.ones((len(p2d_z),1))*z_width, p2d_z.widths], axis = 1)
-        points_arr = np.concatenate([np.ones((len(p2d_z),1))*z_point, p2d_z.points], axis = 1)
-        
-        p3d_tmp = Patches(vol_shape, initialize_by = "data", \
-                          points = points_arr, widths = widths_arr)
-        
-        if icount == 0:
-            p3d_new = p3d_tmp.copy()
-        else:
-            p3d_new.append(p3d_tmp)
-        del p3d_tmp
-
-    sub_vols = np.concatenate(sub_vols, axis = 0)    
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        print("TIME reconstruct 3D patches: %.2f seconds"%(t_gpu/1000.0))
-        
-    return sub_vols, p3d_new
-    
-def recon_chunk(projs, theta, center, p2d, apply_fbp = True, TIMEIT = False):
-    
-    '''
-    reconstruct a region within full volume defined by 2d patches with corner points (y, x) and widths (wy, wx) and a height  
-    
-    Parameters
-    ----------
-    projs : np.ndarray  
-        array of projection images shaped as ntheta, nrows, ncols
-    theta : np.ndarray
-        array of theta values (length = ntheta)  
-    center : float  
-        center value for the projection data  
-    p2d : Patches  
-        patches (2d) on a given slice
-    
-    Returns
-    -------
-    
-    '''
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-
-    device = cp.cuda.Device()
-    memory_pool = cp.cuda.MemoryPool()
-    cp.cuda.set_allocator(memory_pool.malloc)
-    
-    stream_copy = cp.cuda.Stream()
-    with stream_copy:
-        data = cp.array(projs)
-        center = cp.float32(center)    
-        theta = cp.array(theta, dtype = 'float32')
-        stream_copy.synchronize()
-    
-    if apply_fbp:
-        fbp_filter(data) # need to apply filter to full projection  
-
-    # st* - start, p* - number of points
-    stz = 0
-    pz = data.shape[1] # this is the chunk size
-    sub_vols = []
-    for ip in range(len(p2d)):
-        sty, stx = p2d.points[ip]
-        py, px = p2d.widths[ip]
-        
-        tmp_rec = rec_patch(data, theta, center, \
-                  stx, px, sty, py, stz, pz)
-        sub_vols.append(tmp_rec.get())
-    
-    sub_vols = np.asarray(sub_vols)
-
-    device.synchronize()
-#     print('total bytes: ', memory_pool.total_bytes())    
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        print("TIME reconstruct z-chunk: %.2f seconds"%(t_gpu/1000.0))
-    
-    return sub_vols
 
 
 

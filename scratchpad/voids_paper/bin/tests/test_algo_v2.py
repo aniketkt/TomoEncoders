@@ -17,9 +17,7 @@ from tomo_encoders import Grid
 from tomo_encoders.misc import viewer
 from tomo_encoders import DataFile
 import cupy as cp
-from tomo_encoders.reconstruction.project import get_projections
-from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d, recon_patches_3d_2
-from tomo_encoders.misc.voxel_processing import cylindrical_mask, normalize_volume_gpu
+from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d
 from params import model_path, get_model_params
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
 import tensorflow as tf
@@ -88,17 +86,14 @@ def determine_surface(projs, theta, center, fe, p_surf, p_zeros):
     
     # reconstruct patches on the surface
     start_rec = cp.cuda.Event(); end_rec = cp.cuda.Event(); start_rec.record()
-    x_surf, p_surf = recon_patches_3d(projs, theta, center, p_surf, apply_fbp =True)
+    x_surf, p_surf = recon_patches_3d(projs, theta, center, p_surf, \
+                                      apply_fbp = True, segmenter = fe, \
+                                      segmenter_batch_size = 256)
+
     end_rec.record(); end_rec.synchronize(); t_rec_surf = cp.cuda.get_elapsed_time(start_rec,end_rec)
-    # segment patches on the surface
-    t_start_seg = time.time()
-    min_max = x_surf[:,::4,::4,::4].min(), x_surf[:,::4,::4,::4].max()
-    
-    
-    x_surf = fe.predict_patches("segmenter", x_surf[...,np.newaxis], 256, None, min_max = min_max)[...,0]
+    # fill segmented patches into volume
     p_surf.fill_patches_in_volume(x_surf, Vp)    
-    t_start_seg = time.time() - t_start_seg
-    print(f"\t TIME: reconstruction - {t_rec_surf/1000.0:.2f} secs; segmentation - {t_start_seg:.2f} secs")
+    print(f"\t TIME: reconstruction + segmentation - {t_rec_surf/1000.0:.2f} secs")
     # print(f'total patches reconstructed and segmented around surface: {len(p_surf)}')    
     eff = len(p_surf)*(wd**3)/np.prod(Vp.shape)
     print(f"\t STAT: r value: {eff*100.0:.2f}")        
