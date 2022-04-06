@@ -12,6 +12,7 @@ import tensorflow as tf
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
 from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
+from cupyx.scipy.ndimage import gaussian_filter
 from tomo_encoders import Patches, Grid
 
 def darkflat_correction(data, dark, flat):
@@ -244,7 +245,6 @@ def extract_segmented(obj_mask, cpts, wd, segmenter, batch_size):
     start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
     stream = cp.cuda.Stream()
     yp = cp.empty((batch_size, wd, wd, wd, 1), dtype = cp.float32)
-    
 
     with stream:
         
@@ -257,20 +257,21 @@ def extract_segmented(obj_mask, cpts, wd, segmenter, batch_size):
                  slice(cpts[idx,1], cpts[idx,1] + wd), \
                  slice(cpts[idx,2], cpts[idx,2] + wd))
             
-            yp[ib-1,..., 0] = obj_mask[s].copy()
+            yp[ib-1,..., 0] = obj_mask[s]
             batch_is_full = (ib == batch_size) # is batch full?
             end_of_chunk = (idx == len(cpts) - 1) # are we at the end of the z-chunk?
             if batch_is_full or end_of_chunk:
                 
-                st_seg = cp.cuda.Event(); end_seg = cp.cuda.Event(); st_seg.record()                
                 min_val = yp[:ib].min()
                 max_val = yp[:ib].max()
                 yp[:] = (yp - min_val) / (max_val - min_val)
-                
                 # use DLPack here as yp is cupy array                
-                # cap = yp.toDlpack()
-                # yp_tf = tf.experimental.dlpack.from_dlpack(cap)
-                yp_cpu = np.round(segmenter.models["segmenter"].predict(yp.get()))
+                cap = yp.toDlpack()
+                yp_in = tf.experimental.dlpack.from_dlpack(cap)
+                # if DLPack doesn't work. Just transfer to cpu instead
+                # yp_in = yp.get()
+                st_seg = cp.cuda.Event(); end_seg = cp.cuda.Event(); st_seg.record()                
+                yp_cpu = np.round(segmenter.models["segmenter"](yp_in))
                 end_seg.record(); end_seg.synchronize(); t_seg.append(cp.cuda.get_elapsed_time(st_seg,end_seg))
                 sub_vols.append(yp_cpu[:ib,...,0])
                 ib = 0
@@ -284,7 +285,7 @@ def extract_segmented(obj_mask, cpts, wd, segmenter, batch_size):
     t_seg = np.sum(t_seg)
     t_gpu2cpu -= t_seg
     # import pdb; pdb.set_trace()
-    print(f"voxel processing time for U-net: {t_seg/(np.prod(sub_vols.shape))*1e6:.2f} ns")
+    # print(f"voxel processing time for U-net: {t_seg/(np.prod(sub_vols.shape))*1e6:.2f} ns")
     return sub_vols, t_gpu2cpu, t_seg
 
     
@@ -421,7 +422,7 @@ def fbp_filter(data, TIMEIT = False):
 
 
 
-def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False):
+def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0):
     
     '''
     reconstruct with binning projections and theta
@@ -459,10 +460,10 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         [_, nz, n] = projs.shape
         
         # option 1: average pooling
-        projs = projs[::b_K].copy()
-        data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
+        # projs = projs[::b_K].copy()
+        # data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
         # option 2: simple binning
-        # data = cp.array(projs[::b_K, ::b, ::b].copy())
+        data = cp.array(projs[::b_K, ::b, ::b].copy())
 
         # theta and center
         theta = cp.array(theta[::b_K], dtype = 'float32')
@@ -482,8 +483,15 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
               sty, py, \
               0,   pz) # 0 since projections were cropped vertically
     
-    obj = obj.get()
+
     
+    if blur_sigma > 0:
+        obj = gaussian_filter(obj, blur_sigma)
+
+
+    # obj_cpu = obj.get()
+    # del obj
+    cp._default_memory_pool.free_all_blocks()    
     device.synchronize()
 #     print('total bytes: ', memory_pool.total_bytes())    
     
@@ -536,10 +544,12 @@ def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False
             # do segmentation
             xchunk, t_gpu2cpu, t_seg = extract_segmented(obj_mask, cpts, p3d.wd, segmenter, segmenter_batch_size)
             times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu, t_seg])
+            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}; seg: {t_seg:.2f}")
             pass
         else:
             xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
             times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
+            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}")
         
 
         # APPEND AND GO TO NEXT CHUNK

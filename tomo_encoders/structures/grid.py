@@ -322,19 +322,18 @@ class Grid(dict):
         
         '''  
         xp = cp.get_array_module(vol)
-        
-        _ndim = len(self.vol_shape)
         assert vol.shape == self.vol_shape, "Shape of big volume does not match vol_shape attribute of patches data"
         
-        s = self.slices()
-        
         # make a list of patches
-        if _ndim == 3:
-            sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1], s[ii,2]]) for ii in range(len(self.points))]
-        elif _ndim == 2:
-            sub_vols = [xp.asarray(vol[s[ii,0], s[ii,1]]) for ii in range(len(self.points))]
-        
-        return xp.asarray(sub_vols, dtype = vol.dtype)
+        x = []
+        for ii in range(len(self)):
+            s = (slice(self.points[ii,0], self.points[ii,0] + self.wd),\
+                slice(self.points[ii,1], self.points[ii,1] + self.wd),\
+                slice(self.points[ii,2], self.points[ii,2] + self.wd))
+            # x[ii,...] = vol[s]
+            x.append(vol[s])
+        x = xp.array(x)
+        return x
     
     def fill_patches_in_volume(self, sub_vols, vol_out):
         

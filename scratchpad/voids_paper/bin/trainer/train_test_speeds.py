@@ -16,6 +16,7 @@ import tqdm
 import pandas as pd
 
 import matplotlib as mpl
+sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs')
 from params import *
 
 
