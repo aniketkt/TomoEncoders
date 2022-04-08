@@ -12,20 +12,20 @@ import time
 import seaborn as sns
 import pandas as pd
 
-sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs/')
-from tomo_encoders import Grid
-from tomo_encoders.misc import viewer
+sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs')
+from params import model_path, get_model_params
+sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper')
+from surface_determination import guess_surface, determine_surface
 from tomo_encoders import DataFile
 import cupy as cp
-from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d
-from params import model_path, get_model_params
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
-import tensorflow as tf
+
 # from cupyx.scipy.ndimage import zoom
-from skimage.filters import threshold_otsu
+
 
 ######## START GPU SETTINGS ############
 ########## SET MEMORY GROWTH to True ############
+import tensorflow as tf
 physical_devices = tf.config.list_physical_devices('GPU')
 try:
     tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -49,71 +49,6 @@ sparse_flag = True
 # end_chkpt.record(); end_chkpt.synchronize(); t_chkpt = cp.cuda.get_elapsed_time(st_chkpt,end_chkpt)
 # print(f"time checkpoint {t_chkpt/1000.0:.2f} secs")
 
-def guess_surface(projs, theta, center, b, b_K, wd):
-    ## P-GUESS ##
-    # reconstruction
-
-    st_rec = cp.cuda.Event(); end_rec = cp.cuda.Event(); st_rec.record()
-    V_bin = recon_binning(projs, theta, center, b_K, b, blur_sigma = 0.5)    
-    end_rec.record(); end_rec.synchronize(); t_rec = cp.cuda.get_elapsed_time(st_rec,end_rec)
-    print(f"\tTIME reconstructing with binning - {t_rec/1000.0:.2f} secs")
-    
-    # segmentation
-    thresh = cp.float32(threshold_otsu(V_bin[::4,::4,::4].reshape(-1).get()))
-    V_bin = (V_bin < thresh).astype(cp.uint8).get()
-    
-    # find patches on surface
-    wdb = int(wd//b)
-    p3d = Grid(V_bin.shape, width = wdb)
-    
-    x = p3d.extract(V_bin)
-    is_surf = (np.std(x, axis = (1,2,3)) > 0.0)
-    is_ones = (np.sum(x, axis = (1,2,3))/(wdb**3) == 1)
-    is_zeros = (np.sum(x, axis = (1,2,3))/(wdb**3) == 0)
-    
-    p3d = p3d.rescale(b)
-    p3d_surf = p3d.filter_by_condition(is_surf)
-    p3d_ones = p3d.filter_by_condition(is_ones)
-    p3d_zeros = p3d.filter_by_condition(is_zeros)
-    eff = len(p3d_surf)*(wd**3)/np.prod(p3d_surf.vol_shape)
-    print(f"\tSTAT: r value: {eff*100.0:.2f}")        
-    return p3d_surf, p3d_ones, p3d_zeros
-
-
-def determine_surface(projs, theta, center, fe, p_surf, p_zeros):
-
-    # allocate binary volume
-    Vp = np.ones(p_surf.vol_shape, dtype=np.uint8)
-
-    # assign zeros in the metal region; the void region will be left with ones
-    if p_zeros is not None:
-        s = p_zeros.slices()
-        for i in range(len(p_zeros)):
-            Vp[tuple(s[i])] = 0.0
-    
-    # SCHEME 1: integrate reconstruction and segmention (segments data on gpu itself)
-    # st_proc = cp.cuda.Event(); end_proc = cp.cuda.Event(); st_proc.record()
-    # x_surf, p_surf = recon_patches_3d(projs, theta, center, p_surf, \
-    #                                   apply_fbp = True, segmenter = fe, \
-    #                                   segmenter_batch_size = 256)
-
-    # SCHEME 2: reconstruct and segment separately (copies rec data from gpu to cpu)
-    st_proc = cp.cuda.Event(); end_proc = cp.cuda.Event(); st_proc.record()
-    st_rec = cp.cuda.Event(); end_rec = cp.cuda.Event(); st_rec.record()
-    x_surf, p_surf = recon_patches_3d(projs, theta, center, p_surf, \
-                                      apply_fbp =True)
-    end_rec.record(); end_rec.synchronize(); t_rec = cp.cuda.get_elapsed_time(st_rec,end_rec)
-    min_max = x_surf[:,::4,::4,::4].min(), x_surf[:,::4,::4,::4].max()
-    x_surf = fe.predict_patches("segmenter", x_surf[...,np.newaxis], 256, None, min_max = min_max)[...,0]
-    print(f'\tTIME: reconstruction only - {t_rec/1000.0:.2f} secs')    
-    
-    end_proc.record(); end_proc.synchronize(); t_proc = cp.cuda.get_elapsed_time(st_proc,end_proc)
-    # fill segmented patches into volume
-    p_surf.fill_patches_in_volume(x_surf, Vp)    
-    print(f"\tTIME: reconstruction + segmentation - {t_proc/1000.0:.2f} secs")
-    # print(f'total patches reconstructed and segmented around surface: {len(p_surf)}')    
-    return Vp
-
 
 if __name__ == "__main__":
 
@@ -122,7 +57,7 @@ if __name__ == "__main__":
     fe = SurfaceSegmenter(model_initialization = 'load-model', \
                          model_names = model_names, \
                          model_path = model_path)    
-    # fe.test_speeds(128,n_reps = 5, input_size = (wd,wd,wd))    
+    fe.test_speeds(128,n_reps = 5, input_size = (wd,wd,wd))    
 
 
     # read data and initialize output arrays
@@ -143,6 +78,7 @@ if __name__ == "__main__":
     if sparse_flag:
         p_surf, p_ones, p_zeros = guess_surface(projs, theta, center, b, b_K, wd)
     else:
+        from tomo_encoders import Grid
         p_surf = Grid((projs.shape[1], projs.shape[2], projs.shape[2]), width = wd)
         p_ones = None
         p_zeros = None
@@ -153,7 +89,16 @@ if __name__ == "__main__":
     # determine surface
     print("STEP: determine surface")
     start_determine = cp.cuda.Event(); end_determine = cp.cuda.Event(); start_determine.record()
-    Vp = determine_surface(projs, theta, center, fe, p_surf, p_zeros)
+    
+    # allocate binary volume
+    Vp = np.ones(p_surf.vol_shape, dtype=np.uint8)
+
+    # assign zeros in the metal region; the void region will be left with ones
+    if p_zeros is not None:
+        s = p_zeros.slices()
+        for i in range(len(p_zeros)):
+            Vp[tuple(s[i])] = 0.0
+    Vp = determine_surface(projs, theta, center, fe, p_surf, Vp = Vp)
     end_determine.record(); end_determine.synchronize(); t_determine = cp.cuda.get_elapsed_time(start_determine,end_determine)
     print(f'TIME: determining surface: {t_determine/1000.0:.2f} seconds')
 
