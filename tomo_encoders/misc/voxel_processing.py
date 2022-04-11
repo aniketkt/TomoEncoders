@@ -16,8 +16,6 @@ import numpy as np
 # from tomopy import normalize, minus_log, angles, recon, circ_mask
 # from scipy.ndimage.filters import median_filter
 
-from tomo_encoders import Patches
-from tomo_encoders import DataFile
 import tensorflow as tf
 from multiprocessing import Pool, cpu_count
 import functools

@@ -15,18 +15,6 @@ from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
 from cupyx.scipy.ndimage import gaussian_filter
 from tomo_encoders import Patches, Grid
 
-def darkflat_correction(data, dark, flat):
-    """Dark-flat field correction"""
-    xp = cp.get_array_module(data)
-    for k in range(data.shape[0]):
-        data[k] = (data[k]-dark)/xp.maximum(flat-dark, 1e-6)
-    return data
-
-def minus_log(data):
-    """Taking negative logarithm"""
-    data = -cp.log(cp.maximum(data, 1e-6))
-    return data
-
 def show_orthoplane(self, axis, idx, prev_img = None):
 
     # convert p3d to p2d
@@ -85,6 +73,8 @@ extern "C" {
     }
 
 
+
+
     void __global__ rec(float *f, float *g, float *theta, float center, int ntheta, int nz, int n, int stx, int px, int sty, int py, int stz, int pz)
     {
         int tx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -137,6 +127,29 @@ extern "C" {
             f[tz*n*n+ty*n+tx] = f0;
     }
 
+    void __global__ rec_all(float *f, float *g, float *theta, float center, int ntheta, int nz, int n)
+    {
+        int tx = blockDim.x * blockIdx.x + threadIdx.x;
+        int ty = blockDim.y * blockIdx.y + threadIdx.y;
+        int tz = blockDim.z * blockIdx.z + threadIdx.z;
+        if (tx >= n || ty >= n || tz>=nz)
+            return;
+        int s0 = 0;
+        int ind = 0;
+        float f0 = 0;
+        float sp = 0;
+        
+        for (int k = 0; k < ntheta; k++)
+        {
+            sp = (tx - n / 2) * __cosf(theta[k]) - (ty - n / 2) * __sinf(theta[k]) + center; //polar coordinate
+            //linear interpolation
+            s0 = roundf(sp);
+            ind = k * n * nz + tz * n + s0;
+            if ((s0 >= 0) & (s0 < n - 1))
+                f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
+        }
+        f[tz*n*n+ty*n+tx] = f0;
+    }
 
 
 }
@@ -149,6 +162,7 @@ rec_kernel = module.get_function('rec')
 rec_pts_kernel = module.get_function('rec_pts')
 rec_pts_xy_kernel = module.get_function('rec_pts_xy')
 rec_mask_kernel = module.get_function('rec_mask')
+rec_all_kernel = module.get_function('rec_all')
 
 def rec_pts(data, theta, center, pts):
     
@@ -332,7 +346,34 @@ def rec_mask(obj, data, theta, center):
     # print("TIME rec_mask: %.2f ms"%t_gpu)
     return t_gpu
     
+
+def rec_all(obj, data, theta, center):
+    """Reconstruct all data array on GPU"""
+    [ntheta, nz, n] = data.shape
     
+    start_gpu = cp.cuda.Event()
+    end_gpu = cp.cuda.Event()
+    start_gpu.record()
+    stream_rec = cp.cuda.Stream()
+    with stream_rec:
+        
+        data = cp.ascontiguousarray(data)
+        theta = cp.ascontiguousarray(theta)
+        
+        rec_all_kernel((int(cp.ceil(n/16)), int(cp.ceil(n/16)), \
+                    int(cp.ceil(nz/4))), (16, 16, 4), \
+                   (obj, data, theta, cp.float32(center),\
+                    ntheta, nz, n))
+        stream_rec.synchronize()
+    
+    end_gpu.record()
+    end_gpu.synchronize()
+    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
+    
+    # print("TIME rec_mask: %.2f ms"%t_gpu)
+    return t_gpu
+
+
 def rec_patch(data, theta, center, stx, px, sty, py, stz, pz, TIMEIT = False):
     """Reconstruct subvolume [stz:stz+pz,sty:sty+py,stx:stx+px] on GPU"""
     [ntheta, nz, n] = data.shape
@@ -569,8 +610,60 @@ def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False
     else:
         return x, p3d
 
+def darkflat_correction(data, dark, flat):
+    """Dark-flat field correction"""
+    xp = cp.get_array_module(data)
+    for k in range(data.shape[0]):
+        data[k] = (data[k]-dark)/xp.maximum(flat-dark, 1e-6)
+    return data
+
+def minus_log(data):
+    """Taking negative logarithm"""
+    data = -cp.log(cp.maximum(data, 1e-6))
+    return data
 
     
+def recon_all(projs, theta, center, nc, dark, flat):
+    
+    ntheta, nz, n = projs.shape
+    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
+    theta = cp.array(theta, dtype = cp.float32)
+    center = cp.float32(center)
+    dark = cp.array(dark)
+    flat = cp.array(flat)
+    obj_gpu = cp.empty((nc, n, n), dtype = cp.float32)
+    obj_out = np.zeros((nz, n, n), dtype = np.float32)
+    
+    
+    for ic in range(int(np.ceil(nz/nc))):
+        s_chunk = slice(ic*nc, (ic+1)*nc)
+        # COPY DATA TO GPU
+        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+        stream = cp.cuda.Stream()
+        with stream:
+            data.set(projs[:,s_chunk,:].astype(np.float32))
+        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+        print(f"\tTIME copying data to gpu: {t_cpu2gpu:.2f} ms")            
+            
+        data = darkflat_correction(data, dark[s_chunk,...], flat[s_chunk,...])
+        data = minus_log(data)
+
+        # FBP FILTER
+        t_filt = fbp_filter(data)
+        print(f'\tTIME fbp filter: {t_filt:.2f} ms')
+        
+        # BACK-PROJECTION
+        t_rec = rec_all(obj_gpu, data, theta, center)
+        print(f'\tTIME back-projection: {t_rec:.2f} ms')
+        
+        obj_out[s_chunk] = obj_gpu.get()
+
+    del obj_gpu, data, theta, center    
+    cp._default_memory_pool.free_all_blocks()    
+    
+    return obj_out
+
+
 
 
 

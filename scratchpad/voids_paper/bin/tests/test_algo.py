@@ -15,7 +15,7 @@ import pandas as pd
 sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs')
 from params import model_path, get_model_params
 sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper')
-from surface_determination import guess_surface, determine_surface
+from tomo_encoders.tasks.surface_determination import guess_surface, determine_surface
 from tomo_encoders import DataFile
 import cupy as cp
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
