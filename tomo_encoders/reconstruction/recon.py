@@ -15,6 +15,7 @@ from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
 from cupyx.scipy.ndimage import gaussian_filter
 from tomo_encoders import Patches, Grid
 from cupyx.scipy import ndimage
+from tomo_encoders.reconstruction.retrieve_phase import paganin_filter
 
 def show_orthoplane(self, axis, idx, prev_img = None):
 
@@ -612,30 +613,20 @@ def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False
         return x, p3d
 
 
-def darkflat_correction(data, dark, flat):
-    """Dark-flat field correction"""
+def preprocess(data, dark, flat):
+    data[:] = (data-dark)/(cp.maximum(flat-dark, 1.0e-6))                
     
-    tmp = cp.maximum(flat-dark, 1e-6)
-    for k in range(data.shape[0]):# work with 2D arrays to save GPU memory
-        data[k] = (data[k]-dark)/tmp
-    return data
-
-def minus_log(data):
-    """Taking negative logarithm"""
-    
-    for k in range(data.shape[0]):# work with 2D arrays to save GPU memory
-        data[k] = -cp.log(cp.maximum(data[k], 1e-6))
-    return data
-
-def remove_outliers(data, dezinger):
-    """Remove outliers"""
-    
-    r = int(dezinger)            
-    fdata = ndimage.median_filter(data,[1,r,r])
+    fdata = ndimage.median_filter(data,[1,2,2])
     ids = cp.where(cp.abs(fdata-data)>0.5*cp.abs(fdata))
     data[ids] = fdata[ids]        
-    return data
     
+    if 1:
+        data[:] = paganin_filter(data, alpha = 0.001, energy = 30.0, pixel_size = 3.10e-04)
+
+    data[:] = -cp.log(cp.maximum(data,1.0e-6))
+    
+    return
+
 def recon_all(projs, theta, center, nc, dark, flat):
 
     ntheta, nz, n = projs.shape
@@ -658,12 +649,8 @@ def recon_all(projs, theta, center, nc, dark, flat):
         end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
         # print(f"\tTIME copying data to gpu: {t_cpu2gpu:.2f} ms")            
             
-        data[:] = (data-dark[s_chunk])/(cp.maximum(flat[s_chunk]-dark[s_chunk], 1.0e-6))                
-        data[:] = -cp.log(cp.maximum(data,1.0e-6))
-        
-        fdata = ndimage.median_filter(data,[1,2,2])
-        ids = cp.where(cp.abs(fdata-data)>0.5*cp.abs(fdata))
-        data[ids] = fdata[ids]        
+        # PREPROCESS
+        t_prep = preprocess(data, dark[s_chunk], flat[s_chunk])
 
         # FBP FILTER
         t_filt = fbp_filter(data)
