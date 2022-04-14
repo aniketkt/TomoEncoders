@@ -152,7 +152,7 @@ class Voids(dict):
             void = Vp[s]
             
             # make sure no other voids fall inside the bounding box
-            void, n_objs = label_np(void)
+            void, n_objs = label_np(void,structure = np.ones((3,3,3),dtype=np.uint8)) #8-connectivity
             objs = find_objects(void)
             counts = [np.sum(void[objs[i]] == i+1) for i in range(n_objs)]
             if len(counts) > 1:
@@ -183,7 +183,7 @@ class Voids(dict):
 
         # reconstruct and segment
         V_bin = coarse_segmentation(projs, theta, center, b_K, b, 0.5)
-        Vl, n_det = label(V_bin)
+        Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
         Vl = Vl.get()
         boundary_id = Vl[boundary_loc]
         slices = find_objects(Vl)
