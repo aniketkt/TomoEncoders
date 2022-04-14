@@ -6,6 +6,7 @@ from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d
 import cupy as cp
 import numpy as np
 from skimage.filters import threshold_otsu
+from tomo_encoders import Grid
 
 
 def coarse_segmentation(projs, theta, center, b_K, b, blur_sigma):
@@ -48,7 +49,7 @@ def guess_surface(projs, theta, center, b, b_K, wd):
     print(f"\tSTAT: r value: {eff*100.0:.2f}")        
     return p3d_surf, p3d_ones, p3d_zeros
 
-def determine_surface(projs, theta, center, fe, p_surf, Vp = None):
+def process_patches(projs, theta, center, fe, p_surf):
 
     # SCHEME 1: integrate reconstruction and segmention (segments data on gpu itself)
     # st_proc = cp.cuda.Event(); end_proc = cp.cuda.Event(); st_proc.record()
@@ -69,16 +70,10 @@ def determine_surface(projs, theta, center, fe, p_surf, Vp = None):
     end_seg.record(); end_seg.synchronize(); t_seg = cp.cuda.get_elapsed_time(st_seg,end_seg)
     t_surf = t_rec + t_seg
     
-    print(f'\tTIME: reconstruction only - {t_rec/1000.0:.2f} secs')    
-    print(f'\tTIME: segmentation only - {t_seg/1000.0:.2f} secs')
-    print(f"\tTIME: reconstruction + segmentation - {t_surf/1000.0:.2f} secs")
+    print(f'\tTIME: local reconstruction - {t_rec/1000.0:.2f} secs')    
+    print(f'\tTIME: local segmentation - {t_seg/1000.0:.2f} secs')
     print(f'\tSTAT: total patches in neighborhood: {len(p_surf)}')    
-    # fill segmented patches into volume
-    if Vp is not None:
-        p_surf.fill_patches_in_volume(x_surf, Vp)    
-        return Vp
-    else:
-        return x_surf, p_surf
+    return x_surf, p_surf
     
     
     

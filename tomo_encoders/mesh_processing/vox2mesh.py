@@ -13,7 +13,7 @@ import numpy as np
 import os
 
 
-def save_ply(filename, verts, faces):
+def save_ply(filename, verts, faces, tex_val = None):
     '''
     Source: https://github.com/julienr/meshcut/blob/master/examples/ply.py
     
@@ -25,11 +25,18 @@ def save_ply(filename, verts, faces):
         f.write('property float x\n')
         f.write('property float y\n')
         f.write('property float z\n')
+        if tex_val is not None:
+            f.write('property uchar red\n')
+            f.write('property uchar green\n')
+            f.write('property uchar blue\n')        
         f.write('element face %d\n' % len(faces))
         f.write('property list uchar int vertex_indices\n')
         f.write('end_header\n')
         for i in range(len(verts)): #verts.shape[0]
-            f.write('%f %f %f\n' % (verts[i][0], verts[i][1], verts[i][2]))
+            if tex_val is not None:
+                f.write('%f %f %f %f %f %f\n' % (verts[i][0], verts[i][1], verts[i][2], tex_val[i][0], tex_val[i][1], tex_val[i][2]))
+            else:
+                f.write('%f %f %f\n' % (verts[i][0], verts[i][1], verts[i][2]))
         for i in range(len(faces)):
             f.write('3 %d %d %d\n' % (faces[i][0], faces[i][1], faces[i][2])) 
         return
