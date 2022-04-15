@@ -29,7 +29,7 @@ def export_voids(vol_seg, n_max_detect, TIMEIT = False, invert = True):
     assert vol_seg.dtype == 'uint8', "vol_seg must be uint8"
     
     t0 = time.time()
-    vol_lab, n_detected,  = label_np(vol_seg^1 if invert else vol_seg)
+    vol_lab, n_detected,  = label_np(vol_seg^1 if invert else vol_seg,structure = np.ones((3,3,3),dtype=np.uint8))
     s_voids = find_objects(vol_lab)
     print("Total voids detected: %i"%n_detected)
     
