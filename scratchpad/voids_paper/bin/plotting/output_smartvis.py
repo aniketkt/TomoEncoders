@@ -47,7 +47,7 @@ if __name__ == "__main__":
     voids_hr = Voids().import_from_disk(voids_hr_path)
     voids_lr = Voids().import_from_disk(voids_lr_path)
     assert len(voids_hr) == len(voids_lr)
-    idxs = np.argsort(voids_hr["sizes"])
+    idxs = np.argsort(voids_hr["sizes"])[::-1]
     voids_hr.select_by_indices(idxs)
     voids_lr.select_by_indices(idxs)    
 

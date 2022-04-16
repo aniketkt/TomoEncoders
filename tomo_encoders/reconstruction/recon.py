@@ -503,10 +503,10 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         [_, nz, n] = projs.shape
         
         # option 1: average pooling
-        # projs = projs[::b_K].copy()
-        # data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
+        projs = projs[::b_K].copy()
+        data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
         # option 2: simple binning
-        data = cp.array(projs[::b_K, ::b, ::b].copy())
+        # data = cp.array(projs[::b_K, ::b, ::b].copy())
 
         # theta and center
         theta = cp.array(theta[::b_K], dtype = 'float32')

@@ -167,6 +167,10 @@ class Voids(dict):
             self["cpts"].append([int((s[i].start)) for i in range(3)])
             self["x_voids"].append(void)
 
+        self["sizes"] = np.asarray(self["sizes"])
+        self["cents"] = np.asarray(self["cents"])
+        self["cpts"] = np.asarray(self["cpts"])
+
         # copy over any other keys
         for key in voids_b.keys():
             if key in self.keys():
@@ -174,17 +178,18 @@ class Voids(dict):
             else:
                 self[key] = voids_b[key]
                 
-        
         end_chkpt.record(); end_chkpt.synchronize(); t_chkpt = cp.cuda.get_elapsed_time(st_chkpt,end_chkpt)
         print(f"\tTIME: importing voids data from grid {t_chkpt/1000.0:.2f} secs")
         return self
 
-    def guess_voids(self, projs, theta, center, b, b_K, boundary_loc = (0,0,0)):
+    def guess_voids(self, V_bin, b, boundary_loc = (0,0,0)):
 
-        # reconstruct and segment
-        V_bin = coarse_segmentation(projs, theta, center, b_K, b, 0.5)
-        Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
-        Vl = Vl.get()
+        if type(V_bin) is cp._core.core.ndarray:
+            Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
+            Vl = Vl.get()
+        else:
+            Vl, n_det = label(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
+            
         boundary_id = Vl[boundary_loc]
         slices = find_objects(Vl)
         print(f"\tSTAT: voids found - {n_det}")
@@ -229,6 +234,8 @@ class Voids(dict):
         selection type could be geq or leq.  
 
         '''
+        if size_thresh_um <= 0:
+            return
         size_thresh = size_thresh_um/(self.b*pixel_size_um)
         idxs = np.arange(len(self["sizes"]))
         cond_list = np.asarray([1 if self["sizes"][idx] >= size_thresh**3 else 0 for idx in idxs])
@@ -239,15 +246,27 @@ class Voids(dict):
         print(f'\tSTAT: size thres: {size_thresh:.2f} pixel length for {size_thresh_um:.2f} um threshold')          
         self.select_by_indices(idxs)
         return
-    
-    def select_around_void(self, void_id, radius):
-        idxs = np.arange(len(self["sizes"]))
+
+    def sort_by_size(self, reverse = False):
         
-        dist = np.linalg.norm((self["cents"] - self["cents"][void_id]), \
-               ord = 2, axis = 1)
+        '''
+        selection type could be geq or leq.  
+
+        '''
+        idxs = np.argsort(self["sizes"])
+        if reverse:
+            idxs = idxs[::-1]    
+        self.select_by_indices(idxs)
+        return
+
+    def select_around_void(self, void_id, radius_um, pixel_size_um = 1.0):
+        '''select voids around a given void within a spherical region'''
+        
+        radius_pix = radius_um/(self.b*pixel_size_um)
+        idxs = np.arange(len(self["sizes"]))
+        dist = np.linalg.norm((self["cents"] - self["cents"][void_id]), ord = 2, axis = 1)
         self["distance_%i"%void_id] = dist
-        cond_list = dist < radius
-        cond_list[0] = 0 # skip the sample boundary
+        cond_list = dist < radius_pix
         idxs = idxs[cond_list == 1]
         self.select_by_indices(idxs)
         return
@@ -272,7 +291,7 @@ class Voids(dict):
         return p3d_sel, r_fac
 
 
-    def _void2mesh(self, void_id, texture_key):
+    def _void2mesh(self, void_id, tex_vals):
 
         void = self["x_voids"][void_id]
         spt = self["cpts"][void_id]
@@ -292,22 +311,39 @@ class Voids(dict):
         verts *= (self.b)
 
         # set texture based on normalized size
-        texture = np.empty((len(verts),3), dtype = np.uint8)
-        
-        color = (self[texture_key][void_id] - self.min_size)/(self.max_size - self.min_size)
-        if texture_key == "sizes":
-            color = np.cbrt(color)
-
-        texture[:,0] = 255.0*color
-        texture[:,1] = 255
+        texture = np.empty((len(verts),3), dtype = np.float32)
+        texture[:,0] = tex_vals[void_id]
+        texture[:,1] = void_id
         texture[:,2] = 255
-
 
         return Surface(verts, faces, texture=texture)
 
+
+    def _gray_to_rainbow(self, gray):
+        '''
+        implements short rainbow colormap
+        https://www.particleincell.com/2014/colormap/
+
+        '''        
+        a = (1-gray)/0.25
+        X = int(a)
+        Y = int(255*(gray-X))
+        if X == 0:
+            r = 255; g = Y; b = 0
+        elif X == 1:
+            r = 255-Y; g = 255; b = 0
+        elif X == 2:
+            r = 0; g = 255; b = Y
+        elif X == 3:
+            r = 0; g = 255-Y; b = 255
+        elif X == 4:
+            r = 0; g = 0; b = 255
+        return r, g, b
     
     def export_void_mesh_with_texture(self, texture_key):
 
+        '''export with texture, slower but vis with color coding
+        '''
         st_chkpt = cp.cuda.Event(); end_chkpt = cp.cuda.Event(); st_chkpt.record()    
         
         id_len = 0
@@ -315,12 +351,20 @@ class Voids(dict):
         faces = []
         texture = []
 
-        self.mean_size = np.mean(self[texture_key])
-        self.max_size = np.max(self[texture_key])
-        self.min_size = np.min(self[texture_key])
+        
+        if texture_key == "sizes":
+            tex_vals = np.log(self["sizes"]+1.0e-12)
+            # perc = 0.95
+            # tex_vals = self[texture_key].copy()
+            # tex_thresh = tex_vals[np.argsort(tex_vals)[int(perc*len(self))]]
+            # tex_vals[tex_vals > tex_thresh] = tex_thresh
+        elif "distance" in texture_key:
+            tex_vals = self[texture_key].copy()
+        
+
 
         for iv in range(len(self)):
-            surf = self._void2mesh(iv, texture_key)
+            surf = self._void2mesh(iv, tex_vals)
             if not np.any(surf["faces"]):
                 continue
             verts.append(surf["vertices"])
@@ -328,9 +372,22 @@ class Voids(dict):
             texture.append(surf["texture"])
             id_len = id_len + len(surf["vertices"])
 
+
+        # normalize colormap
+        texture = np.concatenate(texture, axis = 0)
+        for i3 in range(3):
+            color = texture[:,i3]
+            min_val = color.min()
+            max_val = color.max()
+            if max_val > min_val:
+                texture[:,i3] = 255*(color - min_val)/(max_val - min_val)
+            else:
+                texture[:,i3] = 255
+
+
         surf = Surface(np.concatenate(verts, axis = 0), \
                        np.concatenate(faces, axis = 0), \
-                       texture = np.concatenate(texture, axis = 0))
+                       texture = texture.astype(np.uint8))
         
         end_chkpt.record(); end_chkpt.synchronize(); t_chkpt = cp.cuda.get_elapsed_time(st_chkpt,end_chkpt)
         print(f"\tTIME: compute void mesh {t_chkpt/1000.0:.2f} secs")
