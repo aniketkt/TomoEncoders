@@ -16,214 +16,200 @@ from cupyx.scipy.ndimage import gaussian_filter
 from tomo_encoders import Patches, Grid
 from cupyx.scipy import ndimage
 from tomo_encoders.reconstruction.retrieve_phase import paganin_filter
-
-def show_orthoplane(self, axis, idx, prev_img = None):
-
-    # convert p3d to p2d
-    # fill patches on prev_img (if input) and return
-
-    raise NotImplementError("not implemented yet")
-
-
-source = """
-extern "C" {
-    void __global__ rec_pts(float *f, float *g, float *theta, int *pts, float center, int ntheta, int nz, int n, int npts)
-    {
-        int tx = blockDim.x * blockIdx.x + threadIdx.x;
-        if (tx >= npts)
-            return;
-        int s0 = 0;
-        int ind = 0;
-        float f0 = 0;
-        float sp = 0;
-        
-        for (int k = 0; k < ntheta; k++)
-        {
-            sp = (pts[3*tx+2] - n / 2) * __cosf(theta[k]) - (pts[3*tx+1] - n / 2) * __sinf(theta[k]) + center; //polar coordinate
-            //linear interpolation
-            s0 = roundf(sp);
-            ind = k * n * nz + pts[3*tx+0] * n + s0;
-            if ((s0 >= 0) & (s0 < n - 1))
-                f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
-        }
-        f[tx] = f0;
-    }
+from tomo_encoders.reconstruction.cpp_kernels import rec_patch, rec_mask, rec_all
+from tomo_encoders.reconstruction.prep import fbp_filter, preprocess    
 
 
 
-    void __global__ rec_pts_xy(float *f, float *g, float *theta, int *pts, float center, int ntheta, int nz, int n, int npts)
-    {
-        int tx = blockDim.x * blockIdx.x + threadIdx.x;
-        int ty = blockDim.y * blockIdx.y + threadIdx.y;
-        if (tx >= npts || ty >= nz)
-            return;
-        int s0 = 0;
-        int ind = 0;
-        float f0 = 0;
-        float sp = 0;
-        
-        for (int k = 0; k < ntheta; k++)
-        {
-            sp = (pts[2*tx+1] - n / 2) * __cosf(theta[k]) - (pts[2*tx] - n / 2) * __sinf(theta[k]) + center; //polar coordinate
-            //linear interpolation
-            s0 = roundf(sp);
-            ind = k * n * nz + ty * n + s0;
-            if ((s0 >= 0) & (s0 < n - 1))
-                f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
-        }
-        f[ty*npts+tx] = f0;
-    }
+def recon_all(projs, theta, center, nc, dark, flat):
 
-
-
-
-    void __global__ rec(float *f, float *g, float *theta, float center, int ntheta, int nz, int n, int stx, int px, int sty, int py, int stz, int pz)
-    {
-        int tx = blockDim.x * blockIdx.x + threadIdx.x;
-        int ty = blockDim.y * blockIdx.y + threadIdx.y;
-        int tz = blockDim.z * blockIdx.z + threadIdx.z;
-        if (tx >= px || ty >= py || tz>=pz)
-            return;
-        stx += tx;
-        sty += ty;
-        stz += tz;
-        int s0 = 0;
-        int ind = 0;
-        float f0 = 0;
-        float sp = 0;
-        
-        for (int k = 0; k < ntheta; k++)
-        {
-            sp = (stx - n / 2) * __cosf(theta[k]) - (sty - n / 2) * __sinf(theta[k]) + center; //polar coordinate
-            //linear interpolation
-            s0 = roundf(sp);
-            ind = k * n * nz + stz * n + s0;
-            if ((s0 >= 0) & (s0 < n - 1))
-                f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
-        }
-        f[tz*px*py+ty*px+tx] = f0;
-    }
-
-    void __global__ rec_mask(float *f, float *g, float *theta, float center, int ntheta, int nz, int n)
-    {
-        int tx = blockDim.x * blockIdx.x + threadIdx.x;
-        int ty = blockDim.y * blockIdx.y + threadIdx.y;
-        int tz = blockDim.z * blockIdx.z + threadIdx.z;
-        if (tx >= n || ty >= n || tz>=nz)
-            return;
-        int s0 = 0;
-        int ind = 0;
-        float f0 = 0;
-        float sp = 0;
-        
-        if (f[tz*n*n+ty*n+tx] > 0)
-            for (int k = 0; k < ntheta; k++)
-            {
-                sp = (tx - n / 2) * __cosf(theta[k]) - (ty - n / 2) * __sinf(theta[k]) + center; //polar coordinate
-                //linear interpolation
-                s0 = roundf(sp);
-                ind = k * n * nz + tz * n + s0;
-                if ((s0 >= 0) & (s0 < n - 1))
-                    f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
-            }
-            f[tz*n*n+ty*n+tx] = f0;
-    }
-
-    void __global__ rec_all(float *f, float *g, float *theta, float center, int ntheta, int nz, int n)
-    {
-        int tx = blockDim.x * blockIdx.x + threadIdx.x;
-        int ty = blockDim.y * blockIdx.y + threadIdx.y;
-        int tz = blockDim.z * blockIdx.z + threadIdx.z;
-        if (tx >= n || ty >= n || tz>=nz)
-            return;
-        int s0 = 0;
-        int ind = 0;
-        float f0 = 0;
-        float sp = 0;
-        
-        for (int k = 0; k < ntheta; k++)
-        {
-            sp = (tx - n / 2) * __cosf(theta[k]) - (ty - n / 2) * __sinf(theta[k]) + center; //polar coordinate
-            //linear interpolation
-            s0 = roundf(sp);
-            ind = k * n * nz + tz * n + s0;
-            if ((s0 >= 0) & (s0 < n - 1))
-                f0 += g[ind] + (g[ind+1] - g[ind]) * (sp - s0) / n;
-        }
-        f[tz*n*n+ty*n+tx] = f0;
-    }
-
-
-}
-
-"""
+    ntheta, nz, n = projs.shape
+    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
+    theta = cp.array(theta, dtype = cp.float32)
+    center = cp.float32(center)
+    dark = cp.array(dark)
+    flat = cp.array(flat)
+    obj_gpu = cp.empty((nc, n, n), dtype = cp.float32)
+    obj_out = np.zeros((nz, n, n), dtype = np.float32)
     
     
-module = cp.RawModule(code=source)
-rec_kernel = module.get_function('rec')
-rec_pts_kernel = module.get_function('rec_pts')
-rec_pts_xy_kernel = module.get_function('rec_pts_xy')
-rec_mask_kernel = module.get_function('rec_mask')
-rec_all_kernel = module.get_function('rec_all')
+    for ic in range(int(np.ceil(nz/nc))):
+        s_chunk = slice(ic*nc, (ic+1)*nc)
+        # COPY DATA TO GPU
+        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+        stream = cp.cuda.Stream()
+        with stream:
+            data.set(projs[:,s_chunk,:].astype(np.float32))
+        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+        # print(f"\tTIME copying data to gpu: {t_cpu2gpu:.2f} ms")            
+            
+        # PREPROCESS
+        t_prep = preprocess(data, dark[s_chunk], flat[s_chunk])
 
-def rec_pts(data, theta, center, pts):
+        # FBP FILTER
+        t_filt = fbp_filter(data)
+        # print(f'\tTIME fbp filter: {t_filt:.2f} ms')
+        
+        # BACK-PROJECTION
+        t_rec = rec_all(obj_gpu, data, theta, center)
+        # print(f'\tTIME back-projection: {t_rec:.2f} ms')
+        
+        obj_out[s_chunk] = obj_gpu.get()
+
+    del obj_gpu, data, theta, center    
+    cp._default_memory_pool.free_all_blocks()    
+    
+    return obj_out
+
+
+def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0):
+    
+    '''
+    reconstruct with binning projections and theta
+    
+    Parameters
+    ----------
+    projs : np.ndarray  
+        array of projection images shaped as ntheta, nrows, ncols
+    theta : np.ndarray
+        array of theta values (length = ntheta)  
+    center : float  
+        center value for the projection data  
+    theta_binning : int
+        binning of theta
+    z_binning : int
+        vertical binning of projections
+    col_binning : int  
+        horizontal binning of projections  
+    
+    Returns
+    -------
+    
+    '''
     
     start_gpu = cp.cuda.Event()
     end_gpu = cp.cuda.Event()
     start_gpu.record()
-    stream_rec = cp.cuda.Stream()
     
-    with stream_rec:
-        [ntheta, nz, n] = data.shape
-        obj = cp.zeros(len(pts),dtype='float32', order='C')
-        data = cp.ascontiguousarray(data)
-        theta = cp.ascontiguousarray(theta)     
-        pts = cp.ascontiguousarray(pts)     
+    device = cp.cuda.Device()
+    memory_pool = cp.cuda.MemoryPool()
+    cp.cuda.set_allocator(memory_pool.malloc)
+    
+    stream_copy = cp.cuda.Stream()
+    with stream_copy:
+        [_, nz, n] = projs.shape
+        
+        # option 1: average pooling
+        projs = projs[::b_K].copy()
+        data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
+        # option 2: simple binning
+        # data = cp.array(projs[::b_K, ::b, ::b].copy())
 
-        rec_pts_kernel((int(np.ceil(len(pts)/1024)),1), (1024,1), \
-                   (obj, data, theta, pts, cp.float32(center), ntheta, nz, n, len(pts)))
-        stream_rec.synchronize()
+        # theta and center
+        theta = cp.array(theta[::b_K], dtype = 'float32')
+        center = cp.float32(center/b)
+        vol_shape = (data.shape[1], data.shape[2], data.shape[2])
+        stream_copy.synchronize()
+    
+    if apply_fbp:
+        fbp_filter(data) # need to apply filter to full projection  
+        
+    # st* - start, p* - number of points
+    stz, sty, stx = (0,0,0)
+    pz, py, px = vol_shape
+    st = time.time()
+    obj = rec_patch(data, theta, center, \
+              stx, px, \
+              sty, py, \
+              0,   pz) # 0 since projections were cropped vertically
+    
 
+    
+    if blur_sigma > 0:
+        obj = gaussian_filter(obj, blur_sigma)
+
+
+    # obj_cpu = obj.get()
+    # del obj
+    cp._default_memory_pool.free_all_blocks()    
+    device.synchronize()
+#     print('total bytes: ', memory_pool.total_bytes())    
+    
     end_gpu.record()
     end_gpu.synchronize()
     t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    print("TIME rec_pts: %.2f ms"%t_gpu)
-        
-    return obj
     
-def rec_pts_xy(data, theta, center, pts):
-    
-    '''
-    pts is a sorted array of points y,x with shape (npts,2)
-    
-    '''
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    stream_rec = cp.cuda.Stream()
-    
-    with stream_rec:
-        [ntheta, nz, n] = data.shape
-        obj = cp.zeros((len(pts)*nz),dtype='float32', order='C')
-        data = cp.ascontiguousarray(data)
-        theta = cp.ascontiguousarray(theta)     
-        pts = cp.ascontiguousarray(pts)     
+    if TIMEIT:
+        print("TIME binned reconstruction: %.2f ms"%t_gpu)
+        return obj, t_gpu
+    else:
+        return obj
 
-        nbkx = 256
-        nthx = int(np.ceil(len(pts)/nbkx))
-        nbkz = 4
-        nthz = int(np.ceil(nz/nbkz))
-        rec_pts_xy_kernel((nthx,nthz), (nbkx,nbkz), \
-                   (obj, data, theta, pts, cp.float32(center), ntheta, nz, n, len(pts)))
-        stream_rec.synchronize()
 
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    print("TIME rec_pts: %.2f ms"%t_gpu)
+
+def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False, segmenter = None, segmenter_batch_size = 256):
+
+    z_pts = np.unique(p3d.points[:,0])
+
+    ntheta, nc, n = projs.shape[0], p3d.wd, projs.shape[2]
+    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
+    theta = cp.array(theta, dtype = cp.float32)
+    center = cp.float32(center)
+    obj_mask = cp.empty((nc, n, n), dtype = cp.float32)
+    x = []
+    times = []
+    cpts_all = []
+    for z_pt in z_pts:
+        cpts = p3d.filter_by_condition(p3d.points[:,0] == z_pt).points
+        cpts_all.append(cpts.copy())
+        cpts[:,0] = 0
         
-    return obj
+        # COPY DATA TO GPU
+        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
+        stream = cp.cuda.Stream()
+        with stream:
+            data.set(projs[:,z_pt:z_pt+nc,:])
+        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
+        # print(f"overhead for copying data to gpu: {t_cpu2gpu:.2f} ms")            
+            
+        # FBP FILTER
+        if apply_fbp:
+            t_filt = fbp_filter(data)
+        
+        # BACK-PROJECTION
+        t_mask = make_mask(obj_mask, cpts, p3d.wd)
+        t_rec = rec_mask(obj_mask, data, theta, center)
+        
+        # EXTRACT PATCHES AND SEND TO CPU
+        if segmenter is not None:
+            # do segmentation
+            xchunk, t_gpu2cpu, t_seg = extract_segmented(obj_mask, cpts, p3d.wd, segmenter, segmenter_batch_size)
+            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu, t_seg])
+            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}; seg: {t_seg:.2f}")
+            pass
+        else:
+            xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
+            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
+            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}")
+        
+
+        # APPEND AND GO TO NEXT CHUNK
+        x.append(xchunk)
+
+    del obj_mask, data, theta, center    
+    cp._default_memory_pool.free_all_blocks()    
     
+    cpts_all = np.concatenate(cpts_all, axis = 0)
+    x = np.concatenate(x, axis = 0)
+    
+    
+    p3d = Grid(p3d.vol_shape, initialize_by = "data", \
+               points = cpts_all, width = p3d.wd)
+    if TIMEIT:
+        return x, p3d, np.asarray(times)
+    else:
+        return x, p3d
+
 
 def extract_from_mask(obj_mask, cpts, wd):
     
@@ -320,352 +306,14 @@ def make_mask(obj_mask, corner_pts, wd):
     end_gpu.record(); end_gpu.synchronize(); t_meas = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
     # print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
     return t_meas
-    
-
-def rec_mask(obj, data, theta, center):
-    """Reconstruct mask on GPU"""
-    [ntheta, nz, n] = data.shape
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    stream_rec = cp.cuda.Stream()
-    with stream_rec:
-        
-        data = cp.ascontiguousarray(data)
-        theta = cp.ascontiguousarray(theta)
-        
-        rec_mask_kernel((int(cp.ceil(n/16)), int(cp.ceil(n/16)), \
-                    int(cp.ceil(nz/4))), (16, 16, 4), \
-                   (obj, data, theta, cp.float32(center),\
-                    ntheta, nz, n))
-        stream_rec.synchronize()
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    # print("TIME rec_mask: %.2f ms"%t_gpu)
-    return t_gpu
-    
-
-def rec_all(obj, data, theta, center):
-    """Reconstruct all data array on GPU"""
-    [ntheta, nz, n] = data.shape
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    stream_rec = cp.cuda.Stream()
-    with stream_rec:
-        
-        data = cp.ascontiguousarray(data)
-        theta = cp.ascontiguousarray(theta)
-        
-        rec_all_kernel((int(cp.ceil(n/16)), int(cp.ceil(n/16)), \
-                    int(cp.ceil(nz/4))), (16, 16, 4), \
-                   (obj, data, theta, cp.float32(center),\
-                    ntheta, nz, n))
-        stream_rec.synchronize()
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    # print("TIME rec_mask: %.2f ms"%t_gpu)
-    return t_gpu
-
-
-def rec_patch(data, theta, center, stx, px, sty, py, stz, pz, TIMEIT = False):
-    """Reconstruct subvolume [stz:stz+pz,sty:sty+py,stx:stx+px] on GPU"""
-    [ntheta, nz, n] = data.shape
-    
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    stream_rec = cp.cuda.Stream()
-    with stream_rec:
-        
-        obj = cp.zeros([pz, py, px], dtype='float32', order = 'C')
-        data = cp.ascontiguousarray(data)
-        theta = cp.ascontiguousarray(theta)
-        
-        rec_kernel((int(cp.ceil(px/16)), int(cp.ceil(py/16)), \
-                    int(cp.ceil(pz/4))), (16, 16, 4), \
-                   (obj, data, theta, cp.float32(center),\
-                    ntheta, nz, n, stx, px, sty, py, stz, pz))
-        stream_rec.synchronize()
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    
-    if TIMEIT:
-#         print("TIME rec_patch: %.2f ms"%t_gpu)
-        return obj, t_gpu
-    else:
-        return obj
-
-def _msg_exec_time(self, func, t_exec):
-    print("TIME: %s: %.2f seconds"%(func.__name__, t_exec))
-    return
-
-
-def calc_padding(data_shape):
-    # padding, make sure the width of projection is divisible by four after padding
-    [ntheta, nz, n] = data_shape
-    n_pad = n*(1 + 0.25*2) # 1/4 padding
-    n_pad = int(np.ceil(n_pad/8.0)*8.0) 
-    pad_left = int((n_pad - n)//2)
-    pad_right = n_pad - n - pad_left    
-    
-    # print(f'n: {n}, n_pad: {n_pad}')
-    # print(f'pad_left: {pad_left}, pad_right: {pad_right}')    
-    return pad_left, pad_right
-
-def fbp_filter(data, TIMEIT = False):
-    """FBP filtering of projections"""
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    
-    pad_left, pad_right = calc_padding(data.shape)    
-    # padding
-    data_padded = cp.pad(data, ((0,0),(0,0),(pad_left, pad_right)), mode = 'edge')
-
-    # fft plan
-    plan_fwd = get_fft_plan(data_padded, axes=2, value_type='R2C')
-    plan_inv = get_fft_plan(rfft(data_padded,axis=2), axes=2, value_type='C2R')
-    
-    with plan_fwd:
-
-        # filter mask
-        t = rfftfreq(data_padded.shape[2])
-        wfilter = t.astype(cp.float32) #* (1 - t * 2)**3  # parzen
-
-        # fft
-        data0 = wfilter*rfft(data_padded, axis=2)
-
-    with plan_inv:
-        # inverse fft
-        data[:] = irfft(data0, axis=2)[...,pad_left:-pad_right]
-        
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        # print("TIME fbp_filter: %.2f ms"%t_gpu)
-        pass
-    
-    return t_gpu
 
 
 
-def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0):
-    
-    '''
-    reconstruct with binning projections and theta
-    
-    Parameters
-    ----------
-    projs : np.ndarray  
-        array of projection images shaped as ntheta, nrows, ncols
-    theta : np.ndarray
-        array of theta values (length = ntheta)  
-    center : float  
-        center value for the projection data  
-    theta_binning : int
-        binning of theta
-    z_binning : int
-        vertical binning of projections
-    col_binning : int  
-        horizontal binning of projections  
-    
-    Returns
-    -------
-    
-    '''
-    
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    
-    device = cp.cuda.Device()
-    memory_pool = cp.cuda.MemoryPool()
-    cp.cuda.set_allocator(memory_pool.malloc)
-    
-    stream_copy = cp.cuda.Stream()
-    with stream_copy:
-        [_, nz, n] = projs.shape
-        
-        # option 1: average pooling
-        projs = projs[::b_K].copy()
-        data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
-        # option 2: simple binning
-        # data = cp.array(projs[::b_K, ::b, ::b].copy())
-
-        # theta and center
-        theta = cp.array(theta[::b_K], dtype = 'float32')
-        center = cp.float32(center/b)
-        vol_shape = (data.shape[1], data.shape[2], data.shape[2])
-        stream_copy.synchronize()
-    
-    if apply_fbp:
-        fbp_filter(data) # need to apply filter to full projection  
-        
-    # st* - start, p* - number of points
-    stz, sty, stx = (0,0,0)
-    pz, py, px = vol_shape
-    st = time.time()
-    obj = rec_patch(data, theta, center, \
-              stx, px, \
-              sty, py, \
-              0,   pz) # 0 since projections were cropped vertically
-    
-
-    
-    if blur_sigma > 0:
-        obj = gaussian_filter(obj, blur_sigma)
 
 
-    # obj_cpu = obj.get()
-    # del obj
-    cp._default_memory_pool.free_all_blocks()    
-    device.synchronize()
-#     print('total bytes: ', memory_pool.total_bytes())    
-    
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        print("TIME binned reconstruction: %.2f ms"%t_gpu)
-        return obj, t_gpu
-    else:
-        return obj
 
 
-def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False, segmenter = None, segmenter_batch_size = 256):
 
-    z_pts = np.unique(p3d.points[:,0])
-
-    ntheta, nc, n = projs.shape[0], p3d.wd, projs.shape[2]
-    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
-    theta = cp.array(theta, dtype = cp.float32)
-    center = cp.float32(center)
-    obj_mask = cp.empty((nc, n, n), dtype = cp.float32)
-    x = []
-    times = []
-    cpts_all = []
-    for z_pt in z_pts:
-        cpts = p3d.filter_by_condition(p3d.points[:,0] == z_pt).points
-        cpts_all.append(cpts.copy())
-        cpts[:,0] = 0
-        
-        # COPY DATA TO GPU
-        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
-        stream = cp.cuda.Stream()
-        with stream:
-            data.set(projs[:,z_pt:z_pt+nc,:])
-        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
-        # print(f"overhead for copying data to gpu: {t_cpu2gpu:.2f} ms")            
-            
-        # FBP FILTER
-        if apply_fbp:
-            t_filt = fbp_filter(data)
-        
-        # BACK-PROJECTION
-        t_mask = make_mask(obj_mask, cpts, p3d.wd)
-        t_rec = rec_mask(obj_mask, data, theta, center)
-        
-        # EXTRACT PATCHES AND SEND TO CPU
-        if segmenter is not None:
-            # do segmentation
-            xchunk, t_gpu2cpu, t_seg = extract_segmented(obj_mask, cpts, p3d.wd, segmenter, segmenter_batch_size)
-            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu, t_seg])
-            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}; seg: {t_seg:.2f}")
-            pass
-        else:
-            xchunk, t_gpu2cpu = extract_from_mask(obj_mask, cpts, p3d.wd)
-            times.append([ntheta, nc, n, t_cpu2gpu, t_filt, t_mask, t_rec, t_gpu2cpu])
-            # print(f"rec: {t_rec:.2f}; gpu2cpu: {t_gpu2cpu:.2f}")
-        
-
-        # APPEND AND GO TO NEXT CHUNK
-        x.append(xchunk)
-
-    del obj_mask, data, theta, center    
-    cp._default_memory_pool.free_all_blocks()    
-    
-    cpts_all = np.concatenate(cpts_all, axis = 0)
-    x = np.concatenate(x, axis = 0)
-    
-    
-    p3d = Grid(p3d.vol_shape, initialize_by = "data", \
-               points = cpts_all, width = p3d.wd)
-    if TIMEIT:
-        return x, p3d, np.asarray(times)
-    else:
-        return x, p3d
-
-
-def preprocess(data, dark, flat):
-    data[:] = (data-dark)/(cp.maximum(flat-dark, 1.0e-6))                
-    
-    fdata = ndimage.median_filter(data,[1,2,2])
-    ids = cp.where(cp.abs(fdata-data)>0.5*cp.abs(fdata))
-    data[ids] = fdata[ids]        
-    
-    if 1:
-        data[:] = paganin_filter(data, alpha = 0.001, energy = 30.0, pixel_size = 3.10e-04)
-
-    data[:] = -cp.log(cp.maximum(data,1.0e-6))
-    
-    return
-
-def recon_all(projs, theta, center, nc, dark, flat):
-
-    ntheta, nz, n = projs.shape
-    data = cp.empty((ntheta, nc, n), dtype = cp.float32)
-    theta = cp.array(theta, dtype = cp.float32)
-    center = cp.float32(center)
-    dark = cp.array(dark)
-    flat = cp.array(flat)
-    obj_gpu = cp.empty((nc, n, n), dtype = cp.float32)
-    obj_out = np.zeros((nz, n, n), dtype = np.float32)
-    
-    
-    for ic in range(int(np.ceil(nz/nc))):
-        s_chunk = slice(ic*nc, (ic+1)*nc)
-        # COPY DATA TO GPU
-        start_gpu = cp.cuda.Event(); end_gpu = cp.cuda.Event(); start_gpu.record()
-        stream = cp.cuda.Stream()
-        with stream:
-            data.set(projs[:,s_chunk,:].astype(np.float32))
-        end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
-        # print(f"\tTIME copying data to gpu: {t_cpu2gpu:.2f} ms")            
-            
-        # PREPROCESS
-        t_prep = preprocess(data, dark[s_chunk], flat[s_chunk])
-
-        # FBP FILTER
-        t_filt = fbp_filter(data)
-        # print(f'\tTIME fbp filter: {t_filt:.2f} ms')
-        
-        # BACK-PROJECTION
-        t_rec = rec_all(obj_gpu, data, theta, center)
-        # print(f'\tTIME back-projection: {t_rec:.2f} ms')
-        
-        obj_out[s_chunk] = obj_gpu.get()
-
-    del obj_gpu, data, theta, center    
-    cp._default_memory_pool.free_all_blocks()    
-    
-    return obj_out
 
 
 
