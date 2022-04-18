@@ -16,7 +16,8 @@ import cupy as cp
 from tomo_encoders import Patches
 from tomo_encoders.misc import viewer
 from tomo_encoders import DataFile
-from tomo_encoders.reconstruction.recon import make_mask, rec_mask, extract_from_mask, fbp_filter, calc_padding
+from tomo_encoders.reconstruction.recon import make_mask, rec_mask, extract_from_mask
+from tomo_encoders.reconstruction.prep import fbp_filter
 import pandas as pd
 N_ITERS = 5
 output_path = '/data02/MyArchive/aisteer_3Dencoders/voids_paper_data'

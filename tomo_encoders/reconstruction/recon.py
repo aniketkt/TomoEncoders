@@ -19,16 +19,16 @@ from tomo_encoders.reconstruction.retrieve_phase import paganin_filter
 from tomo_encoders.reconstruction.cpp_kernels import rec_patch, rec_mask, rec_all
 from tomo_encoders.reconstruction.prep import fbp_filter, preprocess    
 
-
-
-def recon_all(projs, theta, center, nc, dark, flat):
+def recon_all(projs, theta, center, nc, dark_flat = None):
 
     ntheta, nz, n = projs.shape
     data = cp.empty((ntheta, nc, n), dtype = cp.float32)
     theta = cp.array(theta, dtype = cp.float32)
     center = cp.float32(center)
-    dark = cp.array(dark)
-    flat = cp.array(flat)
+    if dark_flat is not None:
+        dark, flat = dark_flat
+        dark = cp.array(dark)
+        flat = cp.array(flat)
     obj_gpu = cp.empty((nc, n, n), dtype = cp.float32)
     obj_out = np.zeros((nz, n, n), dtype = np.float32)
     
@@ -44,7 +44,8 @@ def recon_all(projs, theta, center, nc, dark, flat):
         # print(f"\tTIME copying data to gpu: {t_cpu2gpu:.2f} ms")            
             
         # PREPROCESS
-        t_prep = preprocess(data, dark[s_chunk], flat[s_chunk])
+        if dark_flat is not None:
+            t_prep = preprocess(data, dark[s_chunk], flat[s_chunk])
 
         # FBP FILTER
         t_filt = fbp_filter(data)
@@ -62,7 +63,7 @@ def recon_all(projs, theta, center, nc, dark, flat):
     return obj_out
 
 
-def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0):
+def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0, dark_flat = None):
     
     '''
     reconstruct with binning projections and theta
@@ -102,8 +103,18 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         # option 1: average pooling
         projs = projs[::b_K].copy()
         data = cp.array(projs.reshape(projs.shape[0], nz//b, b, n//b, b).mean(axis=(2,4)))
+        if dark_flat is not None:
+            dark, flat = dark_flat
+            dark = cp.array(dark.reshape(nz//b, b, n//b, b).mean(axis=(1,3)))
+            flat = cp.array(flat.reshape(nz//b, b, n//b, b).mean(axis=(1,3)))
+            t_prep = preprocess(data, dark, flat)
+        
         # option 2: simple binning
         # data = cp.array(projs[::b_K, ::b, ::b].copy())
+        # if dark_flat is not None:
+        #     dark = cp.array(dark[::b,::b])
+        #     flat = cp.array(flat[::b,::b])
+        #     t_prep = preprocess(data, dark, flat)
 
         # theta and center
         theta = cp.array(theta[::b_K], dtype = 'float32')
@@ -123,13 +134,10 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
               sty, py, \
               0,   pz) # 0 since projections were cropped vertically
     
-
-    
     if blur_sigma > 0:
         obj = gaussian_filter(obj, blur_sigma)
 
-
-    # obj_cpu = obj.get()
+   # obj_cpu = obj.get()
     # del obj
     cp._default_memory_pool.free_all_blocks()    
     device.synchronize()
@@ -146,8 +154,7 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         return obj
 
 
-
-def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False, segmenter = None, segmenter_batch_size = 256):
+def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False, segmenter = None, segmenter_batch_size = 256, dark_flat = None):
 
     z_pts = np.unique(p3d.points[:,0])
 
@@ -172,6 +179,11 @@ def recon_patches_3d(projs, theta, center, p3d, apply_fbp = True, TIMEIT = False
         end_gpu.record(); end_gpu.synchronize(); t_cpu2gpu = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
         # print(f"overhead for copying data to gpu: {t_cpu2gpu:.2f} ms")            
             
+        if dark_flat is not None:
+            dark = cp.array(dark_flat[0][z_pt:z_pt+nc,...])
+            flat = cp.array(dark_flat[1][z_pt:z_pt+nc,...])
+            t_prep = preprocess(data, dark, flat)
+        
         # FBP FILTER
         if apply_fbp:
             t_filt = fbp_filter(data)
@@ -306,15 +318,6 @@ def make_mask(obj_mask, corner_pts, wd):
     end_gpu.record(); end_gpu.synchronize(); t_meas = cp.cuda.get_elapsed_time(start_gpu,end_gpu)
     # print(f"overhead for making mask from patch coordinates: {t_meas:.2f} ms")        
     return t_meas
-
-
-
-
-
-
-
-
-
 
 
 

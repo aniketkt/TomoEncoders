@@ -29,6 +29,15 @@ class Surface(dict):
         save_ply(filename, self["vertices"], self["faces"], tex_val = self["texture"])
         return
 
+    def show_vis_o3d(self):
+        import open3d as o3d
+        pcd = o3d.geometry.TriangleMesh()
+        pcd.vertices = o3d.utility.Vector3dVector(self["vertices"])
+        pcd.triangles = o3d.utility.Vector3iVector(self["faces"])
+        pcd.vertex_colors = o3d.utility.Vector3dVector(self["texture"])
+        o3d.visualization.draw_geometries([pcd])        
+        return
+
 class Voids(dict):
 
     def __init__(self):

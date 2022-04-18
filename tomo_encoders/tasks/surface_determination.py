@@ -51,7 +51,7 @@ def guess_surface(V_bin, b, wd):
     print(f"\tSTAT: r value: {eff*100.0:.2f}")        
     return p3d_surf, p3d_ones, p3d_zeros
 
-def process_patches(projs, theta, center, fe, p_surf, min_max):
+def process_patches(projs, theta, center, fe, p_surf, min_max, TIMEIT = False):
 
     # SCHEME 1: integrate reconstruction and segmention (segments data on gpu itself)
     # st_proc = cp.cuda.Event(); end_proc = cp.cuda.Event(); st_proc.record()
@@ -75,7 +75,10 @@ def process_patches(projs, theta, center, fe, p_surf, min_max):
     print(f'\tTIME: local reconstruction - {t_rec/1000.0:.2f} secs')    
     print(f'\tTIME: local segmentation - {t_seg/1000.0:.2f} secs')
     print(f'\tSTAT: total patches in neighborhood: {len(p_surf)}')    
-    return x_surf, p_surf
+    if TIMEIT:
+        return x_surf, p_surf, t_rec, t_seg
+    else:
+        return x_surf, p_surf
     
     
     

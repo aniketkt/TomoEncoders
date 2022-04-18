@@ -70,9 +70,10 @@ def fbp_filter(data, TIMEIT = False):
 
 
 def preprocess(data, dark, flat):
+    
     data[:] = (data-dark)/(cp.maximum(flat-dark, 1.0e-6))                
     
-    fdata = ndimage.median_filter(data,[1,2,2])
+    fdata = ndimage.median_filter(data,[1,5,5])
     ids = cp.where(cp.abs(fdata-data)>0.5*cp.abs(fdata))
     data[ids] = fdata[ids]        
     
