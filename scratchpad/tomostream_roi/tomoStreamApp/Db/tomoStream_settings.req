@@ -1,0 +1,58 @@
+# This file is used by autosave to determine what PVs to save
+# It is also used by tomoStream to determine what PVs to create
+
+# This file contains all of the PVs used by the tomostream base class.
+
+# Lines that begin with #controlPV are not saved by autosave,
+# but they are used by tomostream.  
+# These PVs are not saved in the tomostream configuration file.
+
+########################
+# tomoStream PV Prefixes
+########################
+$(P)$(R)TomoScanPVPrefix
+
+######################
+# tomoStream PVA names
+######################
+$(P)$(R)ImagePVAPName
+$(P)$(R)DarkPVAName
+$(P)$(R)FlatPVAName
+$(P)$(R)ThetaPVAName
+$(P)$(R)ReconPVAName
+
+############################
+# Streaming analysis control
+############################
+$(P)$(R)BufferSize
+$(P)$(R)Center
+$(P)$(R)CenterTweak
+$(P)$(R)CenterTweakUp
+$(P)$(R)CenterTweakDown
+$(P)$(R)Dezinger
+$(P)$(R)RingRemoval
+$(P)$(R)FilterType
+$(P)$(R)OrthoX
+$(P)$(R)OrthoY
+$(P)$(R)OrthoZ
+$(P)$(R)RotX
+$(P)$(R)RotY
+$(P)$(R)RotZ
+
+##################################
+# Stream status via Channel Access
+##################################
+#controlPV $(P)$(R)ReconTime
+#controlPV $(P)$(R)ReconStatus
+#controlPV $(P)$(R)Watchdog
+
+###################################
+# Stream control via Channel Access
+###################################
+#controlPV $(P)$(R)StartRecon
+#controlPV $(P)$(R)AbortRecon
+
+##############################################
+# Lens change synchronization with orthoslices
+##############################################
+$(P)$(R)LensChangeSync

@@ -1,0 +1,6 @@
+file "$(TOP)/db/tomoStream.template"
+{
+pattern
+{  P,      R, TOMO_SCAN, IMAGE_P, DARK_PVA, FLAT_PVA, RECON_PVA, THETA_PVA}
+{7bmtomo:, TomoStream:, 7bmtomo:TomoScanStream:, 7bmtomo:TomoScanStream:PvaPluginPVPrefix, 7bmtomo:TomoScanStream:StreamDarkFields, 7bmtomo:TomoScanStream:StreamFlatFields, 7bmtomo:TomoStream:StreamRecon, 7bmtomo:TomoScanStream:StreamTheta}
+}

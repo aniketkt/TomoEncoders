@@ -1,0 +1,208 @@
+# Database for EPICS PVS for tomography data streaming software
+# This database contains all of the PVs used by the tomostream base class.
+
+########################
+# tomoStream PV Prefixes
+########################
+
+record(stringout, "$(P)$(R)TomoScanPVPrefix")
+{
+   field(VAL,  "$(TOMO_SCAN)")
+}
+
+
+#######################
+# tomoStream  PVA names
+#######################
+
+record(stringout, "$(P)$(R)ImagePVAPName")
+{
+   field(VAL,  "$(IMAGE_P)")
+}
+
+record(stringout, "$(P)$(R)DarkPVAName")
+{
+   field(VAL,  "$(DARK_PVA)")
+}
+
+record(stringout, "$(P)$(R)FlatPVAName")
+{
+   field(VAL,  "$(FLAT_PVA)")
+}
+
+record(stringout, "$(P)$(R)ThetaPVAName")
+{
+   field(VAL,  "$(THETA_PVA)")
+}
+
+record(stringout, "$(P)$(R)ReconPVAName")
+{
+   field(VAL,  "$(RECON_PVA)")
+}
+
+############################
+# Streaming analysis control
+############################
+
+record(stringout, "$(P)$(R)BufferSize")
+{
+}
+
+record(ao, "$(P)$(R)Center")
+{
+   field(PREC, "3")
+}
+
+record(ao,"$(P)$(R)CenterTweak") {
+    field(VAL, "3")
+    field(PREC,"3")
+}
+
+record(calcout,"$(P)$(R)CenterTweakUp") {
+    field(INPA,"$(P)$(R)CenterTweak NPP NMS")
+    field(INPB,"$(P)$(R)Center NPP NMS")
+    field(CALC,"B+A")
+    field(OUT, "$(P)$(R)Center PP NMS")
+}
+
+record(calcout,"$(P)$(R)CenterTweakDown") {
+    field(INPA,"$(P)$(R)CenterTweak NPP NMS")
+    field(INPB,"$(P)$(R)Center NPP NMS")
+    field(CALC,"B-A")
+    field(OUT, "$(P)$(R)Center PP NMS")
+}
+
+record(mbbo, "$(P)$(R)FilterType")
+{
+   field(ZRVL, "0")
+   field(ZRST, "Parzen")
+   field(ONVL, "1")
+   field(ONST, "Shepp-logan")
+   field(TWVL, "2")
+   field(TWST, "Ramp")
+   field(THVL, "3")
+   field(THST, "Butterworth")
+}
+
+record(mbbo, "$(P)$(R)Dezinger")
+{
+   field(ZRVL, "0")
+   field(ZRST, "None")
+   field(ONVL, "2")
+   field(ONST, "Radius 2")
+   field(TWVL, "3")
+   field(TWST, "Radius 3")
+   field(THVL, "4")
+   field(THST, "Radius 4")
+}
+
+record(mbbo, "$(P)$(R)RingRemoval")
+{
+   field(ZRVL, "0")
+   field(ZRST, "None")
+   field(ONVL, "1")
+   field(ONST, "fw")   
+}
+
+
+record(longout, "$(P)$(R)OrthoX")
+{
+   field(LOPR, "0")
+   field(HOPR, "2448")
+}
+
+record(longout, "$(P)$(R)OrthoY")
+{
+   field(LOPR, "0")
+   field(HOPR, "2448")
+}
+
+record(longout, "$(P)$(R)OrthoZ")
+{
+   field(LOPR, "0")
+   field(HOPR, "2448")
+}
+
+record(ao, "$(P)$(R)RotX")
+{
+   field(PREC, "1")   
+   field(LOPR, "-180")
+   field(HOPR, "180")
+}
+
+record(ao, "$(P)$(R)RotY")
+{
+   field(PREC, "1")   
+   field(LOPR, "-180")
+   field(HOPR, "180")
+}
+
+record(ao, "$(P)$(R)RotZ")
+{
+   field(PREC, "1")  
+   field(LOPR, "-180")
+   field(HOPR, "180") 
+}
+
+##################################
+# Stream status via Channel Access
+##################################
+
+record(waveform,"$(P)$(R)ReconStatus") 
+{
+   field(FTVL, "UCHAR")
+   field(NELM, "256")
+}
+
+record(ao, "$(P)$(R)ReconTime")
+{
+   field(PREC, "5")
+}
+
+record(calcout, "$(P)$(R)Watchdog")
+{
+   field(SCAN, "1 second")
+   field(INPA, "$(P)$(R)Watchdog.VAL NPP")
+   field(CALC, "A-1")
+   field(OCAL, "A>0?1:0")
+   field(OOPT, "On Change")
+   field(DOPT, "Use OCAL")
+   field(OUT,  "$(P)$(R)ServerRunning PP")
+}
+
+record(bi, "$(P)$(R)ServerRunning")
+{
+   field(ZNAM, "Stopped")
+   field(ZSV,  "MAJOR")
+   field(ONAM, "Running")
+   field(OSV,  "NO_ALARM")
+}
+
+###################################
+# Stream control via Channel Access
+###################################
+
+record(busy,"$(P)$(R)StartRecon")
+{
+   field(ZNAM,"Done")
+   field(ZSV, "NO_ALARM")
+   field(ONAM,"Acquire")
+   field(OSV, "MINOR")
+   field(VAL, "0")
+}
+
+record(bo,"$(P)$(R)AbortRecon")
+{
+   field(ZNAM,"No")
+   field(ONAM,"Yes")
+}
+
+##############################################
+# Lens change synchronization with orthoslices
+##############################################
+
+record(bo,"$(P)$(R)LensChangeSync")
+{
+   field(ZNAM,"No")
+   field(ONAM,"Yes")
+}
