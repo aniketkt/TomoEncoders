@@ -5,7 +5,7 @@
 
 
 import numpy as np
-from tomo_encoders.tasks.surface_determination import process_patches
+from tomo_encoders.tasks.void_mapping import process_patches
 from tomo_encoders import Grid
 import pandas as pd
 import sys

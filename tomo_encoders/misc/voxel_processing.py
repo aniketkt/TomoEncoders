@@ -24,6 +24,24 @@ import h5py
 import abc
 import time
 
+class TimerGPU():
+
+    def __init__(self):
+        pass
+
+    def tic(self):
+        self.start = cp.cuda.Event()
+        self.end = cp.cuda.Event()
+        self.start.record()
+        return
+    
+    def toc(self, msg = "execution"):
+        self.end.record()
+        self.end.synchronize()
+        t_elapsed = cp.cuda.get_elapsed_time(self.start, self.end)/1000.0
+        print(f"\tTIME: {msg} {t_elapsed:.2f} secs")        
+        return t_elapsed
+
 def _msg_exec_time(func, t_exec):
     if type(func) is str:
         print("TIME: %s: %.2f seconds"%(func, t_exec))
@@ -91,7 +109,9 @@ def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
         quantile of image data to saturate. E.g. s = 0.01 means saturate the lowest 1% and highest 1% pixels
     
     '''
+    xp = cp.get_array_module(vol)
     
+
     sbin = slice(None, None, normalize_sampling_factor)
     
     if vol.ndim == 4:
@@ -99,9 +119,7 @@ def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
     elif vol.ndim == 3:
         intensity_vals = vol[sbin, sbin, sbin].reshape(-1)
     
-    
-    data_type  = np.asarray(intensity_vals).dtype
-    
+    data_type  = xp.asarray(intensity_vals).dtype
     
     if type(s) == tuple and len(s) == 2:
         slow, shigh = s
@@ -109,12 +127,12 @@ def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
         slow = s
         shigh = s
 
-    h, bins = np.histogram(intensity_vals, bins = 500)
-    c = np.cumsum(h)
-    c_norm = c/np.max(c)
+    h, bins = xp.histogram(intensity_vals, bins = 500)
+    c = xp.cumsum(h)
+    c_norm = c/xp.max(c)
     
-    ibin_low = np.argmin(np.abs(c_norm - slow))
-    ibin_high = np.argmin(np.abs(c_norm - 1 + shigh))
+    ibin_low = xp.argmin(xp.abs(c_norm - slow))
+    ibin_high = xp.argmin(xp.abs(c_norm - 1 + shigh))
     
     alow = bins[ibin_low]
     ahigh = bins[ibin_high]

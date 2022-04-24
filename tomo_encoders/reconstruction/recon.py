@@ -12,12 +12,13 @@ import tensorflow as tf
 # from cupyx.scipy.fft import rfft, irfft, rfftfreq
 
 from cupyx.scipy.fft import rfft, irfft, rfftfreq, get_fft_plan
-from cupyx.scipy.ndimage import gaussian_filter
+from cupyx.scipy.ndimage import gaussian_filter, median_filter
 from tomo_encoders import Patches, Grid
 from cupyx.scipy import ndimage
 from tomo_encoders.reconstruction.retrieve_phase import paganin_filter
 from tomo_encoders.reconstruction.cpp_kernels import rec_patch, rec_mask, rec_all
 from tomo_encoders.reconstruction.prep import fbp_filter, preprocess    
+from tomo_encoders.misc.voxel_processing import TimerGPU
 
 def recon_all(projs, theta, center, nc, dark_flat = None):
 
@@ -62,8 +63,49 @@ def recon_all(projs, theta, center, nc, dark_flat = None):
     
     return obj_out
 
+def recon_coarse(projs, theta, center, blur_sigma = 0, dark_flat = None, median_kernel = 1):
+    '''reconstruct with full projection array on gpu and apply some convolutional filters in post-processing
+    projection array must fit in GPU memory'''    
 
-def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0, dark_flat = None):
+    timer = TimerGPU()
+    timer.tic()
+    device = cp.cuda.Device()
+    memory_pool = cp.cuda.MemoryPool()
+    cp.cuda.set_allocator(memory_pool.malloc)
+    
+    stream_copy = cp.cuda.Stream()
+    with stream_copy:
+        data = cp.array(projs)
+        if dark_flat is not None:
+            dark, flat = dark_flat
+            dark = cp.array(dark)
+            flat = cp.array(flat)
+            t_prep = preprocess(data, dark, flat)
+        
+        # theta and center
+        theta = cp.array(theta, dtype = 'float32')
+        center = cp.float32(center)
+    
+        fbp_filter(data) # need to apply filter to full projection  
+        
+        vol_shape = (data.shape[1], data.shape[2], data.shape[2])
+        obj = cp.empty(vol_shape, dtype = cp.float32)
+        rec_all(obj, data, theta, center)
+   
+        if blur_sigma > 0:
+            obj = gaussian_filter(obj, blur_sigma)
+
+        if median_kernel > 1:
+            obj = ndimage.median_filter(obj, median_kernel)
+
+        stream_copy.synchronize()
+
+    cp._default_memory_pool.free_all_blocks()    
+    device.synchronize()
+    _ = timer.toc(f"reconstruction shape {obj.shape}, median filter {median_kernel}, gaussian filter {blur_sigma}")
+    return obj
+
+def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False, blur_sigma = 0, dark_flat = None, median_kernel = 1):
     
     '''
     reconstruct with binning projections and theta
@@ -112,6 +154,7 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
         # option 2: simple binning
         # data = cp.array(projs[::b_K, ::b, ::b].copy())
         # if dark_flat is not None:
+        #     dark, flat = dark_flat
         #     dark = cp.array(dark[::b,::b])
         #     flat = cp.array(flat[::b,::b])
         #     t_prep = preprocess(data, dark, flat)
@@ -136,6 +179,9 @@ def recon_binning(projs, theta, center, b_K, b, apply_fbp = True, TIMEIT = False
     
     if blur_sigma > 0:
         obj = gaussian_filter(obj, blur_sigma)
+
+    if median_kernel > 1:
+        obj = ndimage.median_filter(obj, median_kernel)
 
    # obj_cpu = obj.get()
     # del obj

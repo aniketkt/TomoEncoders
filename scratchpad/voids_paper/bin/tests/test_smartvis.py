@@ -15,12 +15,12 @@ import pandas as pd
 sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper/configs')
 from params import model_path, get_model_params
 sys.path.append('/home/atekawade/TomoEncoders/scratchpad/voids_paper')
-from tomo_encoders.tasks.surface_determination import process_patches
+from tomo_encoders.tasks.void_mapping import process_patches
 from tomo_encoders.structures.voids import Voids
 from tomo_encoders import DataFile
 import cupy as cp
 from tomo_encoders.neural_nets.surface_segmenter import SurfaceSegmenter
-from tomo_encoders.tasks.surface_determination import coarse_segmentation
+from tomo_encoders.tasks.void_mapping import coarse_segmentation
 
 
 ######## START GPU SETTINGS ############

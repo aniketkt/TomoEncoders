@@ -3,34 +3,24 @@
 """ 
 """ 
 from operator import mod
-from tomo_encoders.misc.voxel_processing import modified_autocontrast
-from tomo_encoders.reconstruction.recon import recon_binning, recon_patches_3d
+from tomo_encoders.misc.voxel_processing import modified_autocontrast, TimerGPU
+from tomo_encoders.reconstruction.recon import recon_patches_3d
 import cupy as cp
 import numpy as np
 from skimage.filters import threshold_otsu
 from tomo_encoders import Grid
 
 
-def coarse_segmentation(projs, theta, center, b_K, b, blur_sigma):
-    '''
-    coarse reconstruct and thresholding
-    input numpy projection data
-    return cupy array
-    '''    
-    st_rec = cp.cuda.Event(); end_rec = cp.cuda.Event(); st_rec.record()
-    V_bin = recon_binning(projs, theta, center, b_K, b, blur_sigma = blur_sigma)    
-    
-    print("\tTODO: modified_autocontrast invokes GPU-CPU transfer. need to implement it on GPU")
-    min_max = modified_autocontrast(V_bin.get(), s = 0.05, normalize_sampling_factor=1)
-
-    end_rec.record(); end_rec.synchronize(); t_rec = cp.cuda.get_elapsed_time(st_rec,end_rec)
-    print(f"\tTIME reconstructing with binning - {t_rec/1000.0:.2f} secs")
-    
-    # segmentation
-    thresh = cp.float32(threshold_otsu(V_bin[::4,::4,::4].reshape(-1).get()))
-    V_bin = (V_bin < thresh).astype(cp.uint8)
-    return V_bin, min_max    
-
+def segment_otsu(vol, s = 0.05):
+    '''segment volume with otsu'''
+    timer = TimerGPU()
+    timer.tic()
+    tmp_values = vol[::4,::4,::4].get()
+    rec_min_max = modified_autocontrast(tmp_values, s = s, normalize_sampling_factor=1)
+    thresh = cp.float32(threshold_otsu(tmp_values.reshape(-1)))
+    vol = (vol < thresh).astype(cp.uint8)
+    timer.toc("otsu thresholding")
+    return vol
 
 def guess_surface(V_bin, b, wd):
     

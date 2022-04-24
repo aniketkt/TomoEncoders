@@ -10,7 +10,7 @@ from scipy.ndimage import label as label_np
 from scipy.ndimage import find_objects
 import vedo
 from tomo_encoders.mesh_processing.vox2mesh import save_ply
-from tomo_encoders.tasks.surface_determination import coarse_segmentation
+from tomo_encoders.misc.voxel_processing import TimerGPU
 import os
 from tifffile import imsave, imread
 import h5py
@@ -54,6 +54,20 @@ class Voids(dict):
 
         return
         
+    def transform_linear_shift(self, shift):
+        shift = np.asarray(shift)
+        self["cents"] = np.asarray(self["cents"]) + shift
+        self["cpts"] = np.asarray(self["cpts"]) + shift
+        s_voids = []
+        for s_void in self["s_voids"]:
+            s_new = tuple([slice(s_void[i3].start+shift[i3], s_void[i3].stop + shift[i3]) for i3 in range(3)])
+            s_voids.append(s_new)
+        self["s_voids"] = s_voids
+        return
+
+            
+
+
     def __len__(self):
         return len(self["x_voids"])
 
@@ -144,7 +158,7 @@ class Voids(dict):
 
         st_chkpt = cp.cuda.Event(); end_chkpt = cp.cuda.Event(); st_chkpt.record()    
 
-        Vp = np.zeros(p_grid.vol_shape)
+        Vp = np.zeros(p_grid.vol_shape, dtype = np.uint8)
         p_grid.fill_patches_in_volume(x_grid, Vp)
 
         self["sizes"] = []
@@ -191,8 +205,10 @@ class Voids(dict):
         print(f"\tTIME: importing voids data from grid {t_chkpt/1000.0:.2f} secs")
         return self
 
-    def guess_voids(self, V_bin, b, boundary_loc = (0,0,0)):
+    def count_voids(self, V_bin, b, boundary_loc = (0,0,0)):
 
+        timer = TimerGPU()
+        timer.tic()
         if type(V_bin) is cp._core.core.ndarray:
             Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
             Vl = Vl.get()
@@ -225,7 +241,7 @@ class Voids(dict):
         self["cpts"] = np.asarray(self["cpts"])
         self.vol_shape = V_bin.shape
         self.b = b
-
+        timer.toc("counting voids")
         return self
 
     def select_by_indices(self, idxs):
