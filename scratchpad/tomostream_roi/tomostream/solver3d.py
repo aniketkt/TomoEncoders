@@ -21,7 +21,6 @@ UPDATE_TIME_INTERVAL = 60.0 # seconds
 from change_detector import change_detector
 ANOMALY_DETECT_FLAG = False
 
-
 mpl.use('Agg')
 
 source = """

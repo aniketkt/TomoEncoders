@@ -14,6 +14,7 @@ from tomo_encoders.misc.voxel_processing import TimerGPU
 import os
 from tifffile import imsave, imread
 import h5py
+import cc3d
 
 class Surface(dict):
     def __init__(self, vertices, faces, texture = None):
@@ -28,6 +29,21 @@ class Surface(dict):
     def write_ply(self, filename):
         save_ply(filename, self["vertices"], self["faces"], tex_val = self["texture"])
         return
+
+
+    def write_ply_npy(self, filename):
+        if os.path.exists(filename):
+            from shutil import rmtree
+            rmtree(filename)
+        
+        os.makedirs(filename)
+        np.save(os.path.join(filename, "vertices.npy"), np.asarray(self["vertices"]))
+        np.save(os.path.join(filename, "faces.npy"), np.asarray(self["faces"]))
+        if self["texture"] is not None:
+            np.save(os.path.join(filename, "texture.npy"), np.asarray(self["texture"]))
+
+        return
+
 
     def show_vis_o3d(self):
         import open3d as o3d
@@ -205,17 +221,22 @@ class Voids(dict):
         print(f"\tTIME: importing voids data from grid {t_chkpt/1000.0:.2f} secs")
         return self
 
-    def count_voids(self, V_bin, b, boundary_loc = (0,0,0)):
+
+    def count_voids(self, V_bin, b):
 
         timer = TimerGPU()
         timer.tic()
+        self.vol_shape = V_bin.shape
         if type(V_bin) is cp._core.core.ndarray:
             Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
             Vl = Vl.get()
         else:
-            Vl, n_det = label(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
-            
-        boundary_id = Vl[boundary_loc]
+            Vl = cc3d.connected_components(V_bin)
+            n_det = Vl.max()
+            # Vl, n_det = label_np(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
+
+
+        
         slices = find_objects(Vl)
         print(f"\tSTAT: voids found - {n_det}")
 
@@ -226,10 +247,15 @@ class Voids(dict):
         self["s_voids"] = []
         
         for idx, s in enumerate(slices):
+            # snew = []
+            # for i3 in range(3):
+            #     start, stop = s[i3].start, s[i3].stop
+            #     start = max(0, start-5)
+            #     stop = min(self.vol_shape[i3], stop+5)
+            #     snew.append(slice(start,stop))
+            # s = tuple(snew)
+
             void = (Vl[s] == idx+1)
-            if idx + 1 == boundary_id:
-                self["x_boundary"] = void.copy()
-                continue
             self["s_voids"].append(s)
             self["sizes"].append(np.sum(void))
             self["cents"].append([int((s[i].start + s[i].stop)//2) for i in range(3)])
@@ -239,10 +265,52 @@ class Voids(dict):
         self["sizes"] = np.asarray(self["sizes"])
         self["cents"] = np.asarray(self["cents"])
         self["cpts"] = np.asarray(self["cpts"])
-        self.vol_shape = V_bin.shape
+        
         self.b = b
         timer.toc("counting voids")
         return self
+
+
+
+    # def count_voids(self, V_bin, b, boundary_loc = (0,0,0)):
+
+    #     timer = TimerGPU()
+    #     timer.tic()
+    #     if type(V_bin) is cp._core.core.ndarray:
+    #         Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
+    #         Vl = Vl.get()
+    #     else:
+    #         Vl, n_det = label(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
+
+
+    #     boundary_id = Vl[boundary_loc]
+    #     slices = find_objects(Vl)
+    #     print(f"\tSTAT: voids found - {n_det}")
+
+    #     self["sizes"] = []
+    #     self["cents"] = []
+    #     self["cpts"] = []
+    #     self["x_voids"] = []
+    #     self["s_voids"] = []
+        
+    #     for idx, s in enumerate(slices):
+    #         void = (Vl[s] == idx+1)
+    #         if idx + 1 == boundary_id:
+    #             self["x_boundary"] = void.copy()
+    #             continue
+    #         self["s_voids"].append(s)
+    #         self["sizes"].append(np.sum(void))
+    #         self["cents"].append([int((s[i].start + s[i].stop)//2) for i in range(3)])
+    #         self["cpts"].append([int((s[i].start)) for i in range(3)])
+    #         self["x_voids"].append(void)
+
+    #     self["sizes"] = np.asarray(self["sizes"])
+    #     self["cents"] = np.asarray(self["cents"])
+    #     self["cpts"] = np.asarray(self["cpts"])
+    #     self.vol_shape = V_bin.shape
+    #     self.b = b
+    #     timer.toc("counting voids")
+    #     return self
 
     def select_by_indices(self, idxs):
 

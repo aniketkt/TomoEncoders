@@ -11,16 +11,70 @@ from skimage.filters import threshold_otsu
 from tomo_encoders import Grid
 
 
+
+def get_values_cyl_mask(vol, mask_fac):
+    
+    vol_shape = vol.shape
+    assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
+    
+    shape_yx = vol_shape[1]
+    shape_z = vol_shape[0]
+    rad = int(mask_fac*shape_yx/2)
+    
+    pts = cp.arange(-int(shape_yx//2), int(cp.ceil(shape_yx//2)))
+    yy, xx = cp.meshgrid(pts, pts, indexing = 'ij')
+    circ = (cp.sqrt(yy**2 + xx**2) < rad).astype(cp.uint8) # inside is positive
+    circ = circ[cp.newaxis, ...]
+    cyl = cp.repeat(circ, shape_z, axis = 0)
+    return vol[cyl > 0]
+
+
+def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
+    
+    vol_shape = out_vol.shape
+    assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
+    
+    shape_yx = vol_shape[1]
+    shape_z = vol_shape[0]
+    rad = int(mask_fac*shape_yx/2)
+    
+    pts = cp.arange(-int(shape_yx//2), int(cp.ceil(shape_yx//2)))
+    yy, xx = cp.meshgrid(pts, pts, indexing = 'ij')
+    circ = (cp.sqrt(yy**2 + xx**2) < rad).astype(cp.uint8) # inside is positive
+    circ = circ[cp.newaxis, ...]
+    cyl = cp.repeat(circ, shape_z, axis = 0)
+    out_vol[cyl == 0] = mask_val
+    
+    return
+
+
 def segment_otsu(vol, s = 0.05):
     '''segment volume with otsu'''
     timer = TimerGPU()
     timer.tic()
     tmp_values = vol[::4,::4,::4].get()
-    rec_min_max = modified_autocontrast(tmp_values, s = s, normalize_sampling_factor=1)
+    # rec_min_max = modified_autocontrast(tmp_values, s = s, normalize_sampling_factor=1)
     thresh = cp.float32(threshold_otsu(tmp_values.reshape(-1)))
     vol = (vol < thresh).astype(cp.uint8)
     timer.toc("otsu thresholding")
     return vol
+
+def edge_map(Y):
+
+    '''
+    this algorithm was inspired by: https://github.com/tomochallenge/tomochallenge_utils/blob/master/foam_phantom_utils.py
+    '''
+    msk = cp.zeros_like(Y)
+    tmp = Y[:-1]!=Y[1:]
+    msk[:-1][tmp] = 1
+    msk[1:][tmp] = 1
+    tmp = Y[:,:-1]!=Y[:,1:]
+    msk[:,:-1][tmp] = 1
+    msk[:,1:][tmp] = 1
+    tmp = Y[:,:,:-1]!=Y[:,:,1:]
+    msk[:,:,:-1][tmp] = 1
+    msk[:,:,1:][tmp] = 1
+    return msk > 0
 
 def guess_surface(V_bin, b, wd):
     
