@@ -13,7 +13,7 @@ import h5py
 import numpy as np
 import os
 import pandas as pd
-from tomo_encoders.misc_utils.img_stats import calc_SNR
+from tomo_encoders.misc.img_stats import calc_SNR
 import time
 
 

@@ -15,6 +15,7 @@ import os
 from tifffile import imsave, imread
 import h5py
 import cc3d
+from skimage.measure import marching_cubes
 
 class Surface(dict):
     def __init__(self, vertices, faces, texture = None):
@@ -67,6 +68,8 @@ class Voids(dict):
         self["surfaces"] = []
         self.vol_shape = (None,None,None)
         self.b = 1
+        self.pad_bb = 0
+        self.marching_cubes_algo = "skimage"#"vedo"
 
         return
         
@@ -80,8 +83,6 @@ class Voids(dict):
             s_voids.append(s_new)
         self["s_voids"] = s_voids
         return
-
-            
 
 
     def __len__(self):
@@ -172,8 +173,6 @@ class Voids(dict):
 
         '''
 
-        st_chkpt = cp.cuda.Event(); end_chkpt = cp.cuda.Event(); st_chkpt.record()    
-
         Vp = np.zeros(p_grid.vol_shape, dtype = np.uint8)
         p_grid.fill_patches_in_volume(x_grid, Vp)
 
@@ -186,12 +185,30 @@ class Voids(dict):
         self.b = 1
         b = voids_b.b
 
-        for s_b in voids_b["s_voids"]:
+        for iv, s_b in enumerate(voids_b["s_voids"]):
             s = tuple([slice(s_b[i].start*b, s_b[i].stop*b) for i in range(3)])
             void = Vp[s]
-            
+
+            cent = [int((s[i].start + s[i].stop)//2) for i in range(3)]
+            self["s_voids"].append(s)
+            self["cents"].append(cent)
+            self["cpts"].append([int((s[i].start)) for i in range(3)])
+
             # make sure no other voids fall inside the bounding box
             void, n_objs = label_np(void,structure = np.ones((3,3,3),dtype=np.uint8)) #8-connectivity
+            
+            
+            # nv = np.asarray(void.shape).astype(np.uint32)
+            # nv_cent = (nv//2).astype(np.uint32)
+            # s_cent = tuple([slice(nv_cent[i3]-1, nv_cent[i3]+2) for i3 in range(3)])
+            # idx_cent = np.median(void[s_cent])
+            # void = (void == idx_cent).astype(np.uint8)
+            
+            
+            # _s = tuple([slice(self.pad_bb*self.b,-self.pad_bb*self.b)]*3)
+            # _idx = np.median(np.clip(void[_s],1,None))
+            # void = (void == _idx).astype(np.uint8)
+
             objs = find_objects(void)
             counts = [np.sum(void[objs[i]] == i+1) for i in range(n_objs)]
             if len(counts) > 1:
@@ -200,10 +217,7 @@ class Voids(dict):
             else:
                 void = (void > 0).astype(np.uint8)
 
-            self["s_voids"].append(s)
             self["sizes"].append(np.sum(void))
-            self["cents"].append([int((s[i].start + s[i].stop)//2) for i in range(3)])
-            self["cpts"].append([int((s[i].start)) for i in range(3)])
             self["x_voids"].append(void)
 
         self["sizes"] = np.asarray(self["sizes"])
@@ -217,28 +231,16 @@ class Voids(dict):
             else:
                 self[key] = voids_b[key]
                 
-        end_chkpt.record(); end_chkpt.synchronize(); t_chkpt = cp.cuda.get_elapsed_time(st_chkpt,end_chkpt)
-        print(f"\tTIME: importing voids data from grid {t_chkpt/1000.0:.2f} secs")
         return self
 
 
-    def count_voids(self, V_bin, b):
-
-        timer = TimerGPU()
-        timer.tic()
-        self.vol_shape = V_bin.shape
-        if type(V_bin) is cp._core.core.ndarray:
-            Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
-            Vl = Vl.get()
-        else:
-            Vl = cc3d.connected_components(V_bin)
-            n_det = Vl.max()
-            # Vl, n_det = label_np(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
-
+    def count_voids(self, V_lab, b, dust_thresh, boundary_loc = (0,0,0)):
 
         
-        slices = find_objects(Vl)
-        print(f"\tSTAT: voids found - {n_det}")
+        self.dust_thresh = dust_thresh
+        self.vol_shape = V_lab.shape
+        boundary_id = V_lab[boundary_loc]
+        slices = find_objects(V_lab)
 
         self["sizes"] = []
         self["cents"] = []
@@ -247,70 +249,32 @@ class Voids(dict):
         self["s_voids"] = []
         
         for idx, s in enumerate(slices):
-            # snew = []
-            # for i3 in range(3):
-            #     start, stop = s[i3].start, s[i3].stop
-            #     start = max(0, start-5)
-            #     stop = min(self.vol_shape[i3], stop+5)
-            #     snew.append(slice(start,stop))
-            # s = tuple(snew)
 
-            void = (Vl[s] == idx+1)
-            self["s_voids"].append(s)
+            cpt = np.asarray([s[i3].start for i3 in range(3)])
+            ept = np.asarray([s[i3].stop for i3 in range(3)])
+            
+            if not np.all(np.clip(ept-cpt-self.dust_thresh,0,None)):
+                continue
+            s = tuple([slice(max(cpt[i3]-self.pad_bb,0), min(ept[i3]+self.pad_bb,self.vol_shape[i3])) for i3 in range(3)])
+            
+            void = (V_lab[s] == idx+1)
+            if idx + 1 == boundary_id:
+                self["x_boundary"] = void.copy()
+                continue
             self["sizes"].append(np.sum(void))
-            self["cents"].append([int((s[i].start + s[i].stop)//2) for i in range(3)])
-            self["cpts"].append([int((s[i].start)) for i in range(3)])
+            self["cents"].append(list((cpt + ept)//2))
+            self["cpts"].append(list(cpt))
             self["x_voids"].append(void)
+            self["s_voids"].append(s)
 
         self["sizes"] = np.asarray(self["sizes"])
         self["cents"] = np.asarray(self["cents"])
         self["cpts"] = np.asarray(self["cpts"])
-        
         self.b = b
-        timer.toc("counting voids")
-        return self
-
-
-
-    # def count_voids(self, V_bin, b, boundary_loc = (0,0,0)):
-
-    #     timer = TimerGPU()
-    #     timer.tic()
-    #     if type(V_bin) is cp._core.core.ndarray:
-    #         Vl, n_det = label(V_bin,structure = cp.ones((3,3,3),dtype=cp.uint8))
-    #         Vl = Vl.get()
-    #     else:
-    #         Vl, n_det = label(V_bin,structure = np.ones((3,3,3),dtype=np.uint8))
-
-
-    #     boundary_id = Vl[boundary_loc]
-    #     slices = find_objects(Vl)
-    #     print(f"\tSTAT: voids found - {n_det}")
-
-    #     self["sizes"] = []
-    #     self["cents"] = []
-    #     self["cpts"] = []
-    #     self["x_voids"] = []
-    #     self["s_voids"] = []
+        self.n_voids = len(self["sizes"])
+        print(f"\tSTAT: voids found - {self.n_voids}")
         
-    #     for idx, s in enumerate(slices):
-    #         void = (Vl[s] == idx+1)
-    #         if idx + 1 == boundary_id:
-    #             self["x_boundary"] = void.copy()
-    #             continue
-    #         self["s_voids"].append(s)
-    #         self["sizes"].append(np.sum(void))
-    #         self["cents"].append([int((s[i].start + s[i].stop)//2) for i in range(3)])
-    #         self["cpts"].append([int((s[i].start)) for i in range(3)])
-    #         self["x_voids"].append(void)
-
-    #     self["sizes"] = np.asarray(self["sizes"])
-    #     self["cents"] = np.asarray(self["cents"])
-    #     self["cpts"] = np.asarray(self["cpts"])
-    #     self.vol_shape = V_bin.shape
-    #     self.b = b
-    #     timer.toc("counting voids")
-    #     return self
+        return self
 
     def select_by_indices(self, idxs):
 
@@ -344,7 +308,6 @@ class Voids(dict):
         
         '''
         selection type could be geq or leq.  
-
         '''
         idxs = np.argsort(self["sizes"])
         if reverse:
@@ -374,15 +337,14 @@ class Voids(dict):
         # find patches on surface
         p3d = Grid(V_bin.shape, width = wd)
         x = p3d.extract(V_bin)
-        is_sel = (np.sum(x, axis = (1,2,3)) > 0.0)
+        is_sel = (np.sum(x, axis = (1,2,3)) > 0)
 
         p3d_sel = p3d.filter_by_condition(is_sel)
         if self.b > 1:
             p3d_sel = p3d_sel.rescale(self.b)
         r_fac = len(p3d_sel)*(wd**3)/np.prod(p3d_sel.vol_shape)
-        print(f"\tSTAT: r value: {r_fac*100.0:.2f}")
+        print(f"\tSTAT: 1/r value: {1/r_fac:.4g}")
         return p3d_sel, r_fac
-
 
     def _void2mesh(self, void_id, tex_vals):
 
@@ -391,14 +353,26 @@ class Voids(dict):
         # make watertight
         void = np.pad(void, tuple([(2,2)]*3), mode = "constant", constant_values = 0)
         
-        # use vedo for marching cubes
-        surf = vedo.Volume(void).isosurface(0.5)
-        verts = surf.points()
+        
+        if np.std(void) == 0:
+            return Surface(None, None, texture=None)
+            
+        if self.marching_cubes_algo == "skimage":
+            # try skimage measure
+            verts, faces, _, __ = marching_cubes(void, 0.5)
+        elif self.marching_cubes_algo == "vedo":
+            # use vedo for marching cubes
+            surf = vedo.Volume(void).isosurface(0.5)
+            verts = surf.points()
+            faces = surf.faces()
+            verts = verts[:,::-1]
+        else:
+            raise ValueError("Marching cubes implementation keyword not recognized")
+
         verts -= 2 # correct for padding
         for i3 in range(3):
-            verts[:,i3] += spt[::-1][i3] # z, y, x to x, y, z
+            verts[:,i3] += spt[i3] # z, y, x to x, y, z
         
-        faces = surf.faces()
 
         # if b > 1, scale up the size
         verts *= (self.b)

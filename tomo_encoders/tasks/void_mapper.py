@@ -9,10 +9,10 @@ import cupy as cp
 import numpy as np
 from skimage.filters import threshold_otsu
 from tomo_encoders import Grid
-from tomo_encoders.reconstruction.cpp_kernels import rec_all
+from tomo_encoders.reconstruction.cuda_kernels import rec_all
 from cupyx.scipy.fft import rfft, irfft
 from tomo_encoders.reconstruction import retrieve_phase
-from tomo_encoders.tasks.void_mapping import segment_otsu, cylindrical_mask, edge_map, get_values_cyl_mask
+from tomo_encoders.tasks.digital_zoom import segment_otsu, cylindrical_mask, edge_map, get_values_cyl_mask
 from cupyx.scipy import ndimage
 from tomo_encoders.misc.voxel_processing import modified_autocontrast
 from tomo_encoders.structures.voids import Voids

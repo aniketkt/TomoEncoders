@@ -16,6 +16,7 @@ import numpy as np
 # from tomopy import normalize, minus_log, angles, recon, circ_mask
 # from scipy.ndimage.filters import median_filter
 
+
 import tensorflow as tf
 from multiprocessing import Pool, cpu_count
 import functools
@@ -24,9 +25,11 @@ import h5py
 import abc
 import time
 
+
 class TimerGPU():
 
-    def __init__(self):
+    def __init__(self, unit):
+        self.unit = unit
         pass
 
     def tic(self):
@@ -38,8 +41,13 @@ class TimerGPU():
     def toc(self, msg = "execution"):
         self.end.record()
         self.end.synchronize()
-        t_elapsed = cp.cuda.get_elapsed_time(self.start, self.end)/1000.0
-        print(f"\tTIME: {msg} {t_elapsed:.2f} secs")        
+        if self.unit == "secs":
+            t_elapsed = cp.cuda.get_elapsed_time(self.start, self.end)/1000.0
+        else:
+            t_elapsed = cp.cuda.get_elapsed_time(self.start, self.end)
+
+        if msg != "execution":
+            print(f"\tTIME: {msg} {t_elapsed:.2f} {self.unit}")
         return t_elapsed
 
 def _msg_exec_time(func, t_exec):
@@ -75,9 +83,27 @@ def _find_min_max(vol, sampling_factor, TIMEIT = False):
         _msg_exec_time("find voxel min max", tot_time)            
     return min_val, max_val
 
+def edge_map(Y):
+
+    '''
+    this algorithm was inspired by: https://github.com/tomochallenge/tomochallenge_utils/blob/master/foam_phantom_utils.py
+    '''
+    xp = cp.get_array_module(Y)
+    msk = xp.zeros_like(Y)
+    tmp = Y[:-1]!=Y[1:]
+    msk[:-1][tmp] = 1
+    msk[1:][tmp] = 1
+    tmp = Y[:,:-1]!=Y[:,1:]
+    msk[:,:-1][tmp] = 1
+    msk[:,1:][tmp] = 1
+    tmp = Y[:,:,:-1]!=Y[:,:,1:]
+    msk[:,:,:-1][tmp] = 1
+    msk[:,:,1:][tmp] = 1
+    return msk > 0
 
 def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
     
+    xp = cp.get_array_module(out_vol)
     vol_shape = out_vol.shape
     assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
     
@@ -85,15 +111,31 @@ def cylindrical_mask(out_vol, mask_fac, mask_val = 0):
     shape_z = vol_shape[0]
     rad = int(mask_fac*shape_yx/2)
     
-    pts = np.arange(-int(shape_yx//2), int(np.ceil(shape_yx//2)))
-    yy, xx = np.meshgrid(pts, pts, indexing = 'ij')
-    circ = (np.sqrt(yy**2 + xx**2) < rad).astype(np.uint8) # inside is positive
-    circ = circ[np.newaxis, ...]
-    cyl = np.repeat(circ, shape_z, axis = 0)
-    
+    pts = xp.arange(-int(shape_yx//2), int(xp.ceil(shape_yx//2)))
+    yy, xx = xp.meshgrid(pts, pts, indexing = 'ij')
+    circ = (xp.sqrt(yy**2 + xx**2) < rad).astype(xp.uint8) # inside is positive
+    circ = circ[xp.newaxis, ...]
+    cyl = xp.repeat(circ, shape_z, axis = 0)
     out_vol[cyl == 0] = mask_val
-    
     return
+
+def get_values_cyl_mask(vol, mask_fac):
+
+    xp = cp.get_array_module(vol)
+    vol_shape = vol.shape
+    assert vol_shape[1] == vol_shape[2], "must be a tomographic volume where shape y = shape x"
+    
+    shape_yx = vol_shape[1]
+    shape_z = vol_shape[0]
+    rad = int(mask_fac*shape_yx/2)
+    
+    pts = xp.arange(-int(shape_yx//2), int(xp.ceil(shape_yx//2)))
+    yy, xx = xp.meshgrid(pts, pts, indexing = 'ij')
+    circ = (xp.sqrt(yy**2 + xx**2) < rad).astype(xp.uint8) # inside is positive
+    circ = circ[xp.newaxis, ...]
+    cyl = xp.repeat(circ, shape_z, axis = 0)
+    return vol[cyl > 0]
+
 
 def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
     
@@ -118,6 +160,8 @@ def modified_autocontrast(vol, s = 0.01, normalize_sampling_factor = 2):
         intensity_vals = vol[:, sbin, sbin, sbin].reshape(-1)
     elif vol.ndim == 3:
         intensity_vals = vol[sbin, sbin, sbin].reshape(-1)
+    elif vol.ndim == 1:
+        intensity_vals = vol
     
     data_type  = xp.asarray(intensity_vals).dtype
     
@@ -188,22 +232,8 @@ def normalize_volume_gpu(vol, chunk_size = 64, normalize_sampling_factor = 1, TI
     
     return vol
 
-def _edge_map(Y):
 
-    '''
-    this algorithm was inspired by: https://github.com/tomochallenge/tomochallenge_utils/blob/master/foam_phantom_utils.py
-    '''
-    msk = np.zeros_like(Y)
-    tmp = Y[:-1]!=Y[1:]
-    msk[:-1][tmp] = 1
-    msk[1:][tmp] = 1
-    tmp = Y[:,:-1]!=Y[:,1:]
-    msk[:,:-1][tmp] = 1
-    msk[:,1:][tmp] = 1
-    tmp = Y[:,:,:-1]!=Y[:,:,1:]
-    msk[:,:,:-1][tmp] = 1
-    msk[:,:,1:][tmp] = 1
-    return msk > 0
+
     
     
 

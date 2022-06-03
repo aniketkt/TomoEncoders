@@ -20,11 +20,8 @@ from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from multiprocessing import Pool, cpu_count
 import functools
 import cupy as cp
-import h5py
-import abc
 import time
 
 MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if count is exceeded.
@@ -32,7 +29,7 @@ MAX_ITERS = 2000 # iteration max for find_patches(). Will raise warnings if coun
 
 from tomo_encoders.neural_nets.keras_processor import Vox2VoxProcessor_fCNN
 from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
-from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
+from tomo_encoders.misc.voxel_processing import _rescale_data, edge_map
 
 
 
@@ -71,7 +68,7 @@ class SurfaceSegmenter(Vox2VoxProcessor_fCNN):
     def _find_edges(self, patches, cutoff, Y_gt, input_size):
         
         assert Y_gt.shape == patches.vol_shape, "volume of Y_gt does not match vol_shape"
-        y_tmp = patches.extract(_edge_map(Y_gt), input_size)[...,np.newaxis]
+        y_tmp = patches.extract(edge_map(Y_gt), input_size)[...,np.newaxis]
         cond_list = np.sum(y_tmp, axis = (1,2,3)) > np.prod(input_size)*cutoff
         return cond_list.astype(bool)
     
@@ -273,6 +270,7 @@ class SurfaceSegmenter(Vox2VoxProcessor_fCNN):
             x_in = x[sb,...]
 
             if min_max is not None:
+                x_in = np.clip(x_in, *min_max)
                 min_val, max_val = min_max
                 x_in = _rescale_data(x_in, float(min_val), float(max_val))
             
@@ -295,53 +293,6 @@ class SurfaceSegmenter(Vox2VoxProcessor_fCNN):
         
         return out_arr
     
-
-
-    def predict_patches_gpu(self, x, chunk_size):
-
-        '''
-        Predicts sub_vols with input from cupy using DLPack. This is a wrapper around keras.model.predict() that speeds up inference on inputs lengths that are not factors of 2. Use this function to do multiprocessing if necessary.  
-        
-        '''
-        assert x.ndim == 5, "x must be 5-dimensional (batch_size, nz, ny, nx, 1)."
-        
-        t0 = time.time()
-        nb = len(x)
-        nchunks = int(np.ceil(nb/chunk_size))
-        nb_padded = nchunks*chunk_size
-        padding = nb_padded - nb
-        min_val, max_val = x[:,::2,::2,::2].min(), x[:,::2,::2,::2].max()
-        x = _rescale_data(x, float(min_val), float(max_val))
-        if padding != 0:
-            x = cp.pad(x, ((0,padding), (0,0), (0,0), (0,0)), mode = 'edge')
-            
-        for k in range(nchunks):
-            sb = slice(k*chunk_size , (k+1)*chunk_size)
-            x[sb,...] = self.models["segmenter"].predict(x[sb,...])
-        
-        if padding != 0:
-            x = x[:-padding,...]
-        
-        out_arr = np.round(out_arr).astype(np.uint8)
-        t_unit = (time.time() - t0)*1000.0
-        
-        return t_unit
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
             
     def _build_models(self, descriptor_tag = "misc", **model_params):
         '''

@@ -16,8 +16,8 @@ from cupyx.scipy.ndimage import gaussian_filter
 from tomo_encoders import Patches, Grid
 from cupyx.scipy import ndimage
 from tomo_encoders.reconstruction.retrieve_phase import paganin_filter
-from tomo_encoders.reconstruction.cpp_kernels import rec_patch, rec_mask, rec_all
-
+from tomo_encoders.reconstruction.cuda_kernels import rec_patch, rec_mask, rec_all
+from tomo_encoders.misc.voxel_processing import TimerGPU
 def calc_padding(data_shape):
     # padding, make sure the width of projection is divisible by four after padding
     [ntheta, nz, n] = data_shape
@@ -30,13 +30,11 @@ def calc_padding(data_shape):
     # print(f'pad_left: {pad_left}, pad_right: {pad_right}')    
     return pad_left, pad_right
 
-def fbp_filter(data, TIMEIT = False):
+def fbp_filter(data):
     """FBP filtering of projections"""
     
-    start_gpu = cp.cuda.Event()
-    end_gpu = cp.cuda.Event()
-    start_gpu.record()
-    
+    timer = TimerGPU("ms")
+    timer.tic()
     pad_left, pad_right = calc_padding(data.shape)    
     # padding
     data_padded = cp.pad(data, ((0,0),(0,0),(pad_left, pad_right)), mode = 'edge')
@@ -50,21 +48,14 @@ def fbp_filter(data, TIMEIT = False):
         # filter mask
         t = rfftfreq(data_padded.shape[2])
         wfilter = t.astype(cp.float32) #* (1 - t * 2)**3  # parzen
-
         # fft
         data0 = wfilter*rfft(data_padded, axis=2)
-
+        
     with plan_inv:
         # inverse fft
         data[:] = irfft(data0, axis=2)[...,pad_left:-pad_right]
         
-    end_gpu.record()
-    end_gpu.synchronize()
-    t_gpu = cp.cuda.get_elapsed_time(start_gpu, end_gpu)
-    
-    if TIMEIT:
-        # print("TIME fbp_filter: %.2f ms"%t_gpu)
-        pass
+    t_gpu = timer.toc()
     
     return t_gpu
 

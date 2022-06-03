@@ -16,16 +16,10 @@ from tomo_encoders import Patches
 from tomo_encoders import DataFile
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from multiprocessing import Pool, cpu_count
 import functools
 import cupy as cp
-import h5py
-import abc
 import time
-from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max, modified_autocontrast, normalize_volume_gpu, _edge_map
-
-from tomo_encoders.neural_nets.Unet3D import build_Unet_3D
-
+from tomo_encoders.misc.voxel_processing import _rescale_data, _find_min_max
 
 
 class GenericKerasProcessor():
