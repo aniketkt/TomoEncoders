@@ -8,14 +8,12 @@ from tomo_encoders import Grid
 from cupyx.scipy.ndimage import label
 from scipy.ndimage import label as label_np
 from scipy.ndimage import find_objects
-import vedo
-from tomo_encoders.mesh_processing.vox2mesh import save_ply
-from tomo_encoders.misc.voxel_processing import TimerGPU
+from tomo_encoders.misc.voxel_processing import TimerGPU, TimerCPU
 import os
 from tifffile import imsave, imread
 import h5py
-import cc3d
 from skimage.measure import marching_cubes
+from tomo_encoders.misc.ellipse_rad_max import get_all_max_ellip_rad
 
 class Surface(dict):
     def __init__(self, vertices, faces, texture = None):
@@ -28,9 +26,32 @@ class Surface(dict):
         return(len(self["vertices"]))
     
     def write_ply(self, filename):
-        save_ply(filename, self["vertices"], self["faces"], tex_val = self["texture"])
+        '''
+        Source: https://github.com/julienr/meshcut/blob/master/examples/ply.py
+        
+        '''
+        with open(filename, 'w') as f:
+            f.write('ply\n')
+            f.write('format ascii 1.0\n')
+            f.write('element vertex %d\n' % len(self["vertices"])) #verts.shape[0]
+            f.write('property float x\n')
+            f.write('property float y\n')
+            f.write('property float z\n')
+            if self["texture"] is not None:
+                f.write('property uchar red\n')
+                f.write('property uchar green\n')
+                f.write('property uchar blue\n')        
+            f.write('element face %d\n' % len(self["faces"]))
+            f.write('property list uchar int vertex_indices\n')
+            f.write('end_header\n')
+            for i in range(len(self["vertices"])): #verts.shape[0]
+                if self["texture"] is not None:
+                    f.write('%f %f %f %f %f %f\n' % (self["vertices"][i,0], self["vertices"][i,1], self["vertices"][i,2], self["texture"][i,0], self["texture"][i,1], self["texture"][i,2]))
+                else:
+                    f.write('%f %f %f\n' % (self["vertices"][i,0], self["vertices"][i,1], self["vertices"][i,2]))
+            for i in range(len(self["faces"])):
+                f.write('3 %d %d %d\n' % (self["faces"][i,0], self["faces"][i,1], self["faces"][i,2])) 
         return
-
 
     def write_ply_npy(self, filename):
         if os.path.exists(filename):
@@ -42,9 +63,7 @@ class Surface(dict):
         np.save(os.path.join(filename, "faces.npy"), np.asarray(self["faces"]))
         if self["texture"] is not None:
             np.save(os.path.join(filename, "texture.npy"), np.asarray(self["texture"]))
-
         return
-
 
     def show_vis_o3d(self):
         import open3d as o3d
@@ -120,6 +139,10 @@ class Voids(dict):
             hf.create_dataset("s_voids", data = np.asarray(s))
             if np.any(self["x_boundary"]):
                 hf.create_dataset("x_boundary", data = np.asarray(self["x_boundary"]))
+
+            if "ellipse_radius_ratio" in self.keys():
+                hf.create_dataset("ellipse_radius_ratio", data = self["ellipse_radius_ratio"])
+
             
         # # write ply mesh of each void into folder (if available)
         # if np.any(self["surfaces"]):
@@ -151,6 +174,9 @@ class Voids(dict):
                 self["x_boundary"] = np.asarray(hf["x_boundary"][:])                
             else:
                 self["x_boundary"] = []
+
+            if "ellipse_radius_ratio" in hf.keys():
+                self["ellipse_radius_ratio"] = np.asarray(hf["ellipse_radius_ratio"][:])
 
         flist = sorted(glob.glob(os.path.join(fpath,"voids", "*.tiff")))
         self["x_voids"] = []
@@ -357,17 +383,13 @@ class Voids(dict):
         if np.std(void) == 0:
             return Surface(None, None, texture=None)
             
-        if self.marching_cubes_algo == "skimage":
-            # try skimage measure
-            verts, faces, _, __ = marching_cubes(void, 0.5)
-        elif self.marching_cubes_algo == "vedo":
-            # use vedo for marching cubes
-            surf = vedo.Volume(void).isosurface(0.5)
-            verts = surf.points()
-            faces = surf.faces()
-            verts = verts[:,::-1]
-        else:
-            raise ValueError("Marching cubes implementation keyword not recognized")
+        # try skimage measure
+        verts, faces, _, __ = marching_cubes(void, 0.5)
+        # # use vedo for marching cubes
+        # surf = vedo.Volume(void).isosurface(0.5)
+        # verts = surf.points()
+        # faces = surf.faces()
+        # verts = verts[:,::-1]
 
         verts -= 2 # correct for padding
         for i3 in range(3):
@@ -380,7 +402,7 @@ class Voids(dict):
         # set texture based on normalized size
         texture = np.empty((len(verts),3), dtype = np.float32)
         texture[:,0] = tex_vals[void_id]
-        texture[:,1] = void_id
+        texture[:,1] = self["sizes"][void_id] #255 #void_id
         texture[:,2] = 255
 
         return Surface(verts, faces, texture=texture)
@@ -407,6 +429,16 @@ class Voids(dict):
             r = 0; g = 0; b = 255
         return r, g, b
     
+
+    def calculate_ellipse_radius_ratio(self):
+        timer = TimerCPU("secs")
+        print("calculating ellipse radius ratios...")
+        timer.tic()
+        self["ellipse_radius_ratio"] = get_all_max_ellip_rad(self["x_voids"])
+        timer.toc("ellipse radius ratio")
+        return
+
+
     def export_void_mesh_with_texture(self, texture_key):
 
         '''export with texture, slower but vis with color coding
@@ -427,7 +459,10 @@ class Voids(dict):
             # tex_vals[tex_vals > tex_thresh] = tex_thresh
         elif "distance" in texture_key:
             tex_vals = self[texture_key].copy()
-        
+        elif "ellipse_radius_ratio" in texture_key:
+            if "ellipse_radius_ratio" not in self.keys():
+                self.calculate_ellipse_radius_ratio()
+            tex_vals = self[texture_key].copy()
 
 
         for iv in range(len(self)):
@@ -461,30 +496,3 @@ class Voids(dict):
         return surf
 
 
-    def export_void_mesh(self):
-
-        st_chkpt = cp.cuda.Event(); end_chkpt = cp.cuda.Event(); st_chkpt.record()    
-        Vb = np.zeros(self.vol_shape, dtype = np.uint8)
-        for iv, s_void in enumerate(self["s_voids"]):
-            Vb[s_void] = self["x_voids"][iv]
-            
-        pt = np.asarray(np.where(Vb == 1)).T
-        spt = np.min(pt, axis = 0)
-        ept = np.max(pt, axis = 0)
-        s_full = tuple([slice(spt[i3], ept[i3]) for i3 in range(3)])
-        surf = vedo.Volume(Vb[s_full]).isosurface(0.5)
-        verts = surf.points()
-        faces = surf.faces()
-
-        for i3 in range(3):
-            verts[:,i3] += spt[::-1][i3] # z, y, x to x, y, z
-
-        if self.b > 1:
-            verts *= (self.b)
-        
-        surf = Surface(verts, faces)
-
-        end_chkpt.record(); end_chkpt.synchronize(); t_chkpt = cp.cuda.get_elapsed_time(st_chkpt,end_chkpt)
-        print(f"\tTIME: compute void mesh {t_chkpt/1000.0:.2f} secs")
-
-        return surf

@@ -50,6 +50,26 @@ class TimerGPU():
             print(f"\tTIME: {msg} {t_elapsed:.2f} {self.unit}")
         return t_elapsed
 
+class TimerCPU():
+
+    def __init__(self, unit):
+        self.unit = unit
+        pass
+
+    def tic(self):
+        self.start = time.time()
+        return
+    
+    def toc(self, msg = "execution"):
+        t_elapsed = time.time() - self.start
+        if self.unit == "ms":
+            t_elapsed *= 1000.0
+
+        if msg != "execution":
+            print(f"\tTIME: {msg} {t_elapsed:.2f} {self.unit}")
+        return t_elapsed
+
+
 def _msg_exec_time(func, t_exec):
     if type(func) is str:
         print("TIME: %s: %.2f seconds"%(func, t_exec))
